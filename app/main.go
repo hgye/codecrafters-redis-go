@@ -19,52 +19,15 @@ func main() {
 		fmt.Println("Failed to bind to port 6379")
 		os.Exit(1)
 	}
-	conn, err := l.Accept()
-	if err != nil {
-		fmt.Println("Error accepting connection: ", err.Error())
-		os.Exit(1)
-	}
+	// conn, err := l.Accept()
+	// if err != nil {
+	// 	fmt.Println("Error accepting connection: ", err.Error())
+	// 	os.Exit(1)
+	// }
 
 	// Create a buffer for reading lines
-	server := redis.NewServer(conn)
-	server.Start(l)
+	server := redis.NewServer(l)
+	server.Start()
 	defer server.Stop()
-	// go func(conn net.Conn) {
-	// reader := bufio.NewReader(conn)
-	// for {
-	// 	line, err := reader.ReadString('\n')
-	// 	if err != nil {
-	// 		fmt.Println("Error reading from connection:", err.Error())
-	// 		os.Exit(1)
-	// 	}
 
-	// 	if redis.ArrayPrefix.IsPrefix(line) {
-	// 		fmt.Println("Skipping RESP array length indicator:", line)
-	// 		// Skip RESP array length indicator
-	// 		line, err = reader.ReadString('\n')
-	// 		if err != nil {
-	// 			fmt.Println("Error reading from connection:", err.Error())
-	// 			os.Exit(1)
-	// 		}
-	// 		fmt.Println("Skipping RESP bulk string length:", line)
-	// 		// Skip RESP bulk string length
-	// 		line, err = reader.ReadString('\n')
-	// 		if err != nil {
-	// 			fmt.Println("Error reading from connection:", err.Error())
-	// 			os.Exit(1)
-	// 		}
-	// 	}
-	// 	fmt.Printf("Received command: %s\n", line)
-	// 	// switch command := strings.TrimSpace(line);
-	// 	command := strings.TrimSpace(line)
-
-	// 	fmt.Printf("Received PING command, command length: %d, command: %s\n", len(command), command)
-	// 	switch strings.ToUpper(command) {
-	// 	case "PING":
-	// 		conn.Write([]byte("+PONG\r\n"))
-	// 	default:
-	// 		conn.Write([]byte("-ERR unknown command\r\n"))
-	// 	}
-	// }
-	// }(conn)
 }

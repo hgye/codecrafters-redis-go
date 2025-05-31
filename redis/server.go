@@ -9,35 +9,37 @@ import (
 )
 
 type Server struct {
-	conn net.Conn
+	// conn net.Conn
+	l net.Listener
 }
 
-func NewServer(conn net.Conn) *Server {
-	return &Server{conn: conn}
+func NewServer(l net.Listener) *Server {
+	return &Server{l: l}
 }
 
-func (s *Server) Start(l net.Listener) {
+func (s *Server) Start() {
+	fmt.Println("Starting server...")
 	for {
 		fmt.Println("Waiting for connection...")
-		conn, err := l.Accept()
+		conn, err := s.l.Accept()
 		fmt.Println("Accepted connection")
 		if err != nil {
 			fmt.Println("Error accepting connection: ", err.Error())
 			os.Exit(1)
 		}
-		s.conn = conn
 
 		go s.handleClient(conn)
 	}
 }
 
 func (s *Server) handleClient(conn net.Conn) {
-	reader := bufio.NewReader(s.conn)
+	reader := bufio.NewReader(conn)
 	for {
 		line, err := reader.ReadString('\n')
 		if err != nil {
 			fmt.Println("Error reading from connection:", err.Error())
 			// os.Exit(1)
+			conn.Close()
 			return
 		}
 
@@ -47,7 +49,9 @@ func (s *Server) handleClient(conn net.Conn) {
 			line, err = reader.ReadString('\n')
 			if err != nil {
 				fmt.Println("Error reading from connection:", err.Error())
-				os.Exit(1)
+				// os.Exit1)
+				conn.Close()
+				return
 			}
 			fmt.Println("Skipping RESP bulk string length:", line)
 			// Skip RESP bulk string length
@@ -55,6 +59,7 @@ func (s *Server) handleClient(conn net.Conn) {
 			if err != nil {
 				fmt.Println("Error reading from connection:", err.Error())
 				// os.Exit(1)
+				conn.Close()
 				return
 			}
 		}
@@ -72,5 +77,5 @@ func (s *Server) handleClient(conn net.Conn) {
 }
 
 func (s *Server) Stop() {
-	s.conn.Close()
+	s.l.Close()
 }
