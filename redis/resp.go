@@ -7,6 +7,7 @@ import (
 	"io"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type Prefix string
@@ -51,10 +52,37 @@ func HandleEcho(args []string) ([]byte, error) {
 }
 
 func HandleSet(args []string, store *Store) ([]byte, error) {
-	if len(args) != 2 {
+	if len(args) < 2 {
 		return nil, errors.New("ERR wrong number of arguments for 'set' command")
 	}
-	store.Set(args[0], args[1])
+	if len(args) != 2 && len(args) != 4 {
+		return nil, errors.New("ERR syntax error")
+	}
+
+	key, value := args[0], args[1]
+	if len(args) == 2 {
+		store.Set(key, value)
+		return EncodeSimpleString("OK"), nil
+	}
+
+	option := strings.ToUpper(args[2])
+	ttlRaw := args[3]
+	ttlN, err := strconv.ParseInt(ttlRaw, 10, 64)
+	if err != nil {
+		return nil, errors.New("ERR value is not an integer or out of range")
+	}
+	if ttlN <= 0 {
+		return nil, errors.New("ERR invalid expire time in 'set' command")
+	}
+
+	switch option {
+	case "EX":
+		store.SetWithExpiry(key, value, time.Duration(ttlN)*time.Second)
+	case "PX":
+		store.SetWithExpiry(key, value, time.Duration(ttlN)*time.Millisecond)
+	default:
+		return nil, errors.New("ERR syntax error")
+	}
 	return EncodeSimpleString("OK"), nil
 }
 
