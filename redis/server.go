@@ -10,11 +10,12 @@ import (
 
 type Server struct {
 	// conn net.Conn
-	l net.Listener
+	l     net.Listener
+	store *Store
 }
 
 func NewServer(l net.Listener) *Server {
-	return &Server{l: l}
+	return &Server{l: l, store: NewStore()}
 }
 
 func (s *Server) Start() {
@@ -77,6 +78,20 @@ func (s *Server) handleClient(conn net.Conn) {
 			conn.Write(EncodeSimpleString("PONG"))
 		case "ECHO":
 			resp, err := HandleEcho(args)
+			if err != nil {
+				conn.Write(EncodeError(err.Error()))
+				continue
+			}
+			conn.Write(resp)
+		case "SET":
+			resp, err := HandleSet(args, s.store)
+			if err != nil {
+				conn.Write(EncodeError(err.Error()))
+				continue
+			}
+			conn.Write(resp)
+		case "GET":
+			resp, err := HandleGet(args, s.store)
 			if err != nil {
 				conn.Write(EncodeError(err.Error()))
 				continue

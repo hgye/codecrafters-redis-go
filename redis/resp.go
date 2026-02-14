@@ -39,11 +39,34 @@ func EncodeBulkString(s string) []byte {
 	return []byte(fmt.Sprintf("$%d\r\n%s\r\n", len(s), s))
 }
 
+func EncodeNullBulkString() []byte {
+	return []byte("$-1\r\n")
+}
+
 func HandleEcho(args []string) ([]byte, error) {
 	if len(args) != 1 {
 		return nil, errors.New("ERR wrong number of arguments for 'echo' command")
 	}
 	return EncodeBulkString(args[0]), nil
+}
+
+func HandleSet(args []string, store *Store) ([]byte, error) {
+	if len(args) != 2 {
+		return nil, errors.New("ERR wrong number of arguments for 'set' command")
+	}
+	store.Set(args[0], args[1])
+	return EncodeSimpleString("OK"), nil
+}
+
+func HandleGet(args []string, store *Store) ([]byte, error) {
+	if len(args) != 1 {
+		return nil, errors.New("ERR wrong number of arguments for 'get' command")
+	}
+	value, ok := store.Get(args[0])
+	if !ok {
+		return EncodeNullBulkString(), nil
+	}
+	return EncodeBulkString(value), nil
 }
 
 // ReadArray reads a RESP array where all elements are bulk strings.
