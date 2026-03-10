@@ -16,6 +16,8 @@ type Config struct {
 type ReplicaInfo struct {
 	MasterHost string
 	MasterPort string
+	ReplicaID  string
+	Offset     int64
 }
 
 type Server struct {
