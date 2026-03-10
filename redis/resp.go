@@ -97,6 +97,37 @@ func HandleGet(args []string, store *Store) ([]byte, error) {
 	return EncodeBulkString(value), nil
 }
 
+func EncodeArray(items []string) []byte {
+	var buf []byte
+	buf = append(buf, []byte(fmt.Sprintf("*%d\r\n", len(items)))...)
+	for _, item := range items {
+		buf = append(buf, EncodeBulkString(item)...)
+	}
+	return buf
+}
+
+func HandleConfig(args []string, cfg Config) ([]byte, error) {
+	if len(args) < 2 {
+		return nil, errors.New("ERR wrong number of arguments for 'config' command")
+	}
+	subcommand := strings.ToUpper(args[0])
+	if subcommand != "GET" {
+		return nil, errors.New("ERR unsupported CONFIG subcommand")
+	}
+	key := strings.ToLower(args[1])
+
+	var value string
+	switch key {
+	case "dir":
+		value = cfg.Dir
+	case "dbfilename":
+		value = cfg.DBFilename
+	default:
+		return EncodeArray([]string{}), nil
+	}
+	return EncodeArray([]string{key, value}), nil
+}
+
 // ReadArray reads a RESP array where all elements are bulk strings.
 // It returns the array items as UTF-8 strings (without trailing CRLF).
 func ReadArray(r *bufio.Reader) ([]string, error) {

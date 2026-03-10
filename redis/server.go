@@ -8,14 +8,19 @@ import (
 	"strings"
 )
 
-type Server struct {
-	// conn net.Conn
-	l     net.Listener
-	store *Store
+type Config struct {
+	Dir        string
+	DBFilename string
 }
 
-func NewServer(l net.Listener) *Server {
-	return &Server{l: l, store: NewStore()}
+type Server struct {
+	l      net.Listener
+	store  *Store
+	config Config
+}
+
+func NewServer(l net.Listener, cfg Config) *Server {
+	return &Server{l: l, store: NewStore(), config: cfg}
 }
 
 func (s *Server) Start() {
@@ -92,6 +97,13 @@ func (s *Server) handleClient(conn net.Conn) {
 			conn.Write(resp)
 		case "GET":
 			resp, err := HandleGet(args, s.store)
+			if err != nil {
+				conn.Write(EncodeError(err.Error()))
+				continue
+			}
+			conn.Write(resp)
+		case "CONFIG":
+			resp, err := HandleConfig(args, s.config)
 			if err != nil {
 				conn.Write(EncodeError(err.Error()))
 				continue
