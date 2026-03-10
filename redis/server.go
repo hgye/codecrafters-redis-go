@@ -113,6 +113,13 @@ func (s *Server) handleClient(conn net.Conn) {
 				continue
 			}
 			conn.Write(resp)
+		case "INFO":
+			resp, err := HandleInfo(args)
+			if err != nil {
+				conn.Write(EncodeError(err.Error()))
+				continue
+			}
+			conn.Write(resp)
 		case "CONFIG":
 			resp, err := HandleConfig(args, s.config)
 			if err != nil {
