@@ -192,35 +192,42 @@ func readRDBString(r io.Reader) (string, error) {
 	}
 
 	encType := (first & 0xC0) >> 6
-
 	if encType == 3 {
-		// Special encoding
-		format := first & 0x3F
-		switch format {
-		case 0: // 8-bit integer
-			b, err := readByte(r)
-			if err != nil {
-				return "", err
-			}
-			return fmt.Sprintf("%d", int8(b)), nil
-		case 1: // 16-bit little-endian integer
-			buf := make([]byte, 2)
-			if _, err := io.ReadFull(r, buf); err != nil {
-				return "", err
-			}
-			return fmt.Sprintf("%d", int16(binary.LittleEndian.Uint16(buf))), nil
-		case 2: // 32-bit little-endian integer
-			buf := make([]byte, 4)
-			if _, err := io.ReadFull(r, buf); err != nil {
-				return "", err
-			}
-			return fmt.Sprintf("%d", int32(binary.LittleEndian.Uint32(buf))), nil
-		default:
-			return "", fmt.Errorf("unsupported special string encoding: %d", format)
-		}
+		return readIntegerString(first, r)
 	}
+	return readLengthPrefixedString(first, r)
+}
 
-	// Regular length-prefixed string
+// readIntegerString decodes a special-encoded integer (0xC0..0xC2) as a string.
+func readIntegerString(first byte, r io.Reader) (string, error) {
+	format := first & 0x3F
+	switch format {
+	case 0: // 8-bit integer
+		b, err := readByte(r)
+		if err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%d", int8(b)), nil
+	case 1: // 16-bit little-endian integer
+		buf := make([]byte, 2)
+		if _, err := io.ReadFull(r, buf); err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%d", int16(binary.LittleEndian.Uint16(buf))), nil
+	case 2: // 32-bit little-endian integer
+		buf := make([]byte, 4)
+		if _, err := io.ReadFull(r, buf); err != nil {
+			return "", err
+		}
+		return fmt.Sprintf("%d", int32(binary.LittleEndian.Uint32(buf))), nil
+	default:
+		return "", fmt.Errorf("unsupported special string encoding: %d", format)
+	}
+}
+
+// readLengthPrefixedString reads a regular length-prefixed string given the first byte already consumed.
+func readLengthPrefixedString(first byte, r io.Reader) (string, error) {
+	encType := (first & 0xC0) >> 6
 	var length int
 	switch encType {
 	case 0:
