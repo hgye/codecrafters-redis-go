@@ -106,6 +106,17 @@ func EncodeArray(items []string) []byte {
 	return buf
 }
 
+func HandleKeys(args []string, store *Store) ([]byte, error) {
+	if len(args) != 1 {
+		return nil, errors.New("ERR wrong number of arguments for 'keys' command")
+	}
+	if args[0] != "*" {
+		return nil, errors.New("ERR only KEYS * is supported")
+	}
+	keys := store.Keys()
+	return EncodeArray(keys), nil
+}
+
 func HandleConfig(args []string, cfg Config) ([]byte, error) {
 	if len(args) < 2 {
 		return nil, errors.New("ERR wrong number of arguments for 'config' command")

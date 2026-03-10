@@ -20,7 +20,11 @@ type Server struct {
 }
 
 func NewServer(l net.Listener, cfg Config) *Server {
-	return &Server{l: l, store: NewStore(), config: cfg}
+	s := &Server{l: l, store: NewStore(), config: cfg}
+	if err := LoadRDB(cfg, s.store); err != nil {
+		fmt.Println("Warning: failed to load RDB:", err)
+	}
+	return s
 }
 
 func (s *Server) Start() {
@@ -97,6 +101,13 @@ func (s *Server) handleClient(conn net.Conn) {
 			conn.Write(resp)
 		case "GET":
 			resp, err := HandleGet(args, s.store)
+			if err != nil {
+				conn.Write(EncodeError(err.Error()))
+				continue
+			}
+			conn.Write(resp)
+		case "KEYS":
+			resp, err := HandleKeys(args, s.store)
 			if err != nil {
 				conn.Write(EncodeError(err.Error()))
 				continue

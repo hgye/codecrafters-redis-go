@@ -31,6 +31,19 @@ func (s *Store) SetWithExpiry(key, value string, ttl time.Duration) {
 	s.kv[key] = storeEntry{value: value, expiresAt: time.Now().Add(ttl)}
 }
 
+func (s *Store) Keys() []string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	keys := make([]string, 0, len(s.kv))
+	now := time.Now()
+	for k, e := range s.kv {
+		if e.expiresAt.IsZero() || now.Before(e.expiresAt) {
+			keys = append(keys, k)
+		}
+	}
+	return keys
+}
+
 func (s *Store) Get(key string) (string, bool) {
 	s.mu.RLock()
 	e, ok := s.kv[key]
