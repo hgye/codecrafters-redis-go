@@ -21,14 +21,16 @@ type ReplicaInfo struct {
 }
 
 type Server struct {
-	l       net.Listener
-	store   *Store
-	config  Config
-	replica *ReplicaInfo
+	l          net.Listener
+	store      *Store
+	config     Config
+	replica    *ReplicaInfo
+	port       string
+	masterConn net.Conn
 }
 
-func NewServer(l net.Listener, cfg Config, replica *ReplicaInfo) *Server {
-	s := &Server{l: l, store: NewStore(), config: cfg, replica: replica}
+func NewServer(l net.Listener, cfg Config, replica *ReplicaInfo, port string) *Server {
+	s := &Server{l: l, store: NewStore(), config: cfg, replica: replica, port: port}
 	if err := LoadRDB(cfg, s.store); err != nil {
 		fmt.Println("Warning: failed to load RDB:", err)
 	}
@@ -36,6 +38,12 @@ func NewServer(l net.Listener, cfg Config, replica *ReplicaInfo) *Server {
 }
 
 func (s *Server) Start() {
+	if s.replica != nil {
+		if err := s.Handshake(); err != nil {
+			fmt.Println("Error during handshake:", err)
+			os.Exit(1)
+		}
+	}
 	fmt.Println("Starting server...")
 	for {
 		fmt.Println("Waiting for connection...")
@@ -135,6 +143,10 @@ func (s *Server) handleClient(conn net.Conn) {
 				continue
 			}
 			conn.Write(resp)
+		case "REPLCONF":
+			conn.Write(EncodeSimpleString("OK"))
+		case "PSYNC":
+			conn.Write(EncodeSimpleString("FULLRESYNC 8371445fff36d3332a088d7be77bf1419d907b2d 0"))
 		default:
 			conn.Write(EncodeError("ERR unknown command"))
 		}

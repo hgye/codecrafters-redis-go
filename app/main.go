@@ -42,7 +42,7 @@ func main() {
 		}
 	}
 
-	server := redis.NewServer(l, cfg, replica)
+	server := redis.NewServer(l, cfg, replica, fmt.Sprintf("%d", *port))
 	server.Start()
 	defer server.Stop()
 }
