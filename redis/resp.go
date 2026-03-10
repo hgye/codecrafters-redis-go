@@ -117,14 +117,18 @@ func HandleKeys(args []string, store *Store) ([]byte, error) {
 	return EncodeArray(keys), nil
 }
 
-func HandleInfo(args []string) ([]byte, error) {
+func HandleInfo(args []string, replica *ReplicaInfo) ([]byte, error) {
 	if len(args) < 1 {
 		return nil, errors.New("ERR wrong number of arguments for 'info' command")
 	}
 	section := strings.ToLower(args[0])
 	switch section {
 	case "replication":
-		info := "# Replication\r\nrole:master\r\nconnected_slaves:0\r\nmaster_replid:8371445fff36d3332a088d7be77bf1419d907b2d\r\nmaster_repl_offset:0\r\nsecond_repl_offset:-1\r\nrepl_backlog_active:0\r\nrepl_backlog_size:1048576\r\nrepl_backlog_first_byte_offset:0\r\nrepl_backlog_histlen:0"
+		role := "master"
+		if replica != nil {
+			role = "slave"
+		}
+		info := fmt.Sprintf("# Replication\r\nrole:%s\r\nconnected_slaves:0\r\nmaster_replid:8371445fff36d3332a088d7be77bf1419d907b2d\r\nmaster_repl_offset:0\r\nsecond_repl_offset:-1\r\nrepl_backlog_active:0\r\nrepl_backlog_size:1048576\r\nrepl_backlog_first_byte_offset:0\r\nrepl_backlog_histlen:0", role)
 		return EncodeBulkString(info), nil
 	default:
 		return EncodeBulkString(""), nil

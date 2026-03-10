@@ -13,14 +13,20 @@ type Config struct {
 	DBFilename string
 }
 
-type Server struct {
-	l      net.Listener
-	store  *Store
-	config Config
+type ReplicaInfo struct {
+	MasterHost string
+	MasterPort string
 }
 
-func NewServer(l net.Listener, cfg Config) *Server {
-	s := &Server{l: l, store: NewStore(), config: cfg}
+type Server struct {
+	l       net.Listener
+	store   *Store
+	config  Config
+	replica *ReplicaInfo
+}
+
+func NewServer(l net.Listener, cfg Config, replica *ReplicaInfo) *Server {
+	s := &Server{l: l, store: NewStore(), config: cfg, replica: replica}
 	if err := LoadRDB(cfg, s.store); err != nil {
 		fmt.Println("Warning: failed to load RDB:", err)
 	}
@@ -114,7 +120,7 @@ func (s *Server) handleClient(conn net.Conn) {
 			}
 			conn.Write(resp)
 		case "INFO":
-			resp, err := HandleInfo(args)
+			resp, err := HandleInfo(args, s.replica)
 			if err != nil {
 				conn.Write(EncodeError(err.Error()))
 				continue

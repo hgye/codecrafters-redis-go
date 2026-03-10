@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strings"
 
 	"github.com/codecrafters-io/redis-starter-go/redis"
 )
@@ -16,6 +17,7 @@ func main() {
 	dir := flag.String("dir", "", "directory for RDB files")
 	dbfilename := flag.String("dbfilename", "", "RDB filename")
 	port := flag.Int("port", 6379, "port to listen on")
+	replicaof := flag.String("replicaof", "", "replicate from <host port>")
 	flag.Parse()
 
 	l, err := net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", *port))
@@ -28,7 +30,19 @@ func main() {
 		Dir:        *dir,
 		DBFilename: *dbfilename,
 	}
-	server := redis.NewServer(l, cfg)
+
+	var replica *redis.ReplicaInfo
+	if *replicaof != "" {
+		parts := strings.SplitN(*replicaof, " ", 2)
+		if len(parts) == 2 {
+			replica = &redis.ReplicaInfo{
+				MasterHost: parts[0],
+				MasterPort: parts[1],
+			}
+		}
+	}
+
+	server := redis.NewServer(l, cfg, replica)
 	server.Start()
 	defer server.Stop()
 }
