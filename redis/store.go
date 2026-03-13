@@ -71,3 +71,9 @@ func (s *Store) Get(key string) (string, bool) {
 	}
 	return e.value, true
 }
+
+func (s *Store) Delete(key string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.kv, key)
+}

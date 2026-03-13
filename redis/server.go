@@ -23,14 +23,15 @@ type ReplicaInfo struct {
 }
 
 type Server struct {
-	l          net.Listener
-	store      *Store
-	config     Config
-	replica    *ReplicaInfo
-	port       string
-	masterConn net.Conn
-	replicaMu  sync.Mutex
-	replicas   []net.Conn
+	l            net.Listener
+	store        *Store
+	config       Config
+	replica      *ReplicaInfo
+	port         string
+	masterConn   net.Conn
+	masterReader *bufio.Reader
+	replicaMu    sync.Mutex
+	replicas     []net.Conn
 }
 
 func NewServer(l net.Listener, cfg Config, replica *ReplicaInfo, port string) *Server {
@@ -47,6 +48,7 @@ func (s *Server) Start() {
 			fmt.Println("Error during handshake:", err)
 			os.Exit(1)
 		}
+		go s.listenToMaster()
 	}
 	fmt.Println("Starting server...")
 	for {

@@ -79,7 +79,39 @@ func (s *Server) Handshake() error {
 	}
 
 	s.masterConn = conn
+	s.masterReader = reader
 	return nil
+}
+
+// listenToMaster reads propagated commands from the master and applies them to the store.
+func (s *Server) listenToMaster() {
+	for {
+		parts, err := ReadArray(s.masterReader)
+		if err != nil {
+			fmt.Println("Error reading from master:", err)
+			s.masterConn.Close()
+			return
+		}
+		if len(parts) == 0 {
+			continue
+		}
+
+		command := strings.ToUpper(parts[0])
+		args := parts[1:]
+
+		switch command {
+		case "SET":
+			if _, err := HandleSet(args, s.store); err != nil {
+				fmt.Println("Error applying SET from master:", err)
+			}
+		case "DEL":
+			for _, key := range args {
+				s.store.Delete(key)
+			}
+		default:
+			fmt.Printf("Replica ignoring propagated command: %s\n", command)
+		}
+	}
 }
 
 // receiveRDB reads the RDB bulk transfer ($<len>\r\n<bytes>) and parses it into the store.
