@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"strings"
+	"sync"
 )
 
 type Config struct {
@@ -28,6 +29,8 @@ type Server struct {
 	replica    *ReplicaInfo
 	port       string
 	masterConn net.Conn
+	replicaMu  sync.Mutex
+	replicas   []net.Conn
 }
 
 func NewServer(l net.Listener, cfg Config, replica *ReplicaInfo, port string) *Server {
@@ -116,6 +119,7 @@ func (s *Server) handleClient(conn net.Conn) {
 				continue
 			}
 			conn.Write(resp)
+			s.propagate(parts)
 		case "GET":
 			resp, err := HandleGet(args, s.store)
 			if err != nil {
@@ -152,6 +156,10 @@ func (s *Server) handleClient(conn net.Conn) {
 			rdbData := emptyRDB()
 			conn.Write([]byte(fmt.Sprintf("$%d\r\n", len(rdbData))))
 			conn.Write(rdbData)
+			// Register this connection as a replica
+			s.replicaMu.Lock()
+			s.replicas = append(s.replicas, conn)
+			s.replicaMu.Unlock()
 		default:
 			conn.Write(EncodeError("ERR unknown command"))
 		}
@@ -160,6 +168,18 @@ func (s *Server) handleClient(conn net.Conn) {
 
 func (s *Server) Stop() {
 	s.l.Close()
+}
+
+// propagate sends a write command as a RESP array to all connected replicas.
+func (s *Server) propagate(parts []string) {
+	data := EncodeArray(parts)
+	s.replicaMu.Lock()
+	defer s.replicaMu.Unlock()
+	for _, r := range s.replicas {
+		if _, err := r.Write(data); err != nil {
+			fmt.Println("Error propagating to replica:", err)
+		}
+	}
 }
 
 // emptyRDB returns the bytes of a minimal valid RDB file.
