@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 type Config struct {
@@ -22,6 +24,11 @@ type ReplicaInfo struct {
 	Offset     int64
 }
 
+type replicaEntry struct {
+	conn   net.Conn
+	reader *bufio.Reader
+}
+
 type Server struct {
 	l            net.Listener
 	store        *Store
@@ -31,8 +38,9 @@ type Server struct {
 	masterConn   net.Conn
 	masterReader *bufio.Reader
 	replicaMu    sync.Mutex
-	replicas     []net.Conn
+	replicas     []replicaEntry
 	replOffset   int64
+	masterOffset int64 // bytes propagated to replicas
 }
 
 func NewServer(l net.Listener, cfg Config, replica *ReplicaInfo, port string) *Server {
@@ -161,8 +169,11 @@ func (s *Server) handleClient(conn net.Conn) {
 			conn.Write(rdbData)
 			// Register this connection as a replica
 			s.replicaMu.Lock()
-			s.replicas = append(s.replicas, conn)
+			s.replicas = append(s.replicas, replicaEntry{conn: conn, reader: reader})
 			s.replicaMu.Unlock()
+		case "WAIT":
+			resp := s.handleWait(args)
+			conn.Write(resp)
 		default:
 			conn.Write(EncodeError("ERR unknown command"))
 		}
@@ -179,8 +190,88 @@ func (s *Server) propagate(parts []string) {
 	s.replicaMu.Lock()
 	defer s.replicaMu.Unlock()
 	for _, r := range s.replicas {
-		if _, err := r.Write(data); err != nil {
+		if _, err := r.conn.Write(data); err != nil {
 			fmt.Println("Error propagating to replica:", err)
+		}
+	}
+	s.masterOffset += int64(len(data))
+}
+
+// handleWait implements the WAIT command: WAIT numreplicas timeout
+func (s *Server) handleWait(args []string) []byte {
+	if len(args) < 2 {
+		return EncodeError("ERR wrong number of arguments for 'wait' command")
+	}
+	numReplicas, err := strconv.Atoi(args[0])
+	if err != nil {
+		return EncodeError("ERR value is not an integer")
+	}
+	timeoutMs, err := strconv.Atoi(args[1])
+	if err != nil {
+		return EncodeError("ERR value is not an integer")
+	}
+
+	s.replicaMu.Lock()
+	replCount := len(s.replicas)
+	currentOffset := s.masterOffset
+	s.replicaMu.Unlock()
+
+	// If nothing was propagated, all connected replicas are up to date
+	if currentOffset == 0 {
+		return EncodeInteger(replCount)
+	}
+
+	// Send REPLCONF GETACK * to all replicas
+	getack := EncodeArray([]string{"REPLCONF", "GETACK", "*"})
+	s.replicaMu.Lock()
+	for _, r := range s.replicas {
+		r.conn.Write(getack)
+	}
+	replicas := make([]replicaEntry, len(s.replicas))
+	copy(replicas, s.replicas)
+	s.replicaMu.Unlock()
+
+	acked := 0
+	deadline := time.After(time.Duration(timeoutMs) * time.Millisecond)
+
+	// Collect ACKs from replicas
+	type ackResult struct {
+		offset int64
+	}
+	resultCh := make(chan ackResult, len(replicas))
+
+	for _, r := range replicas {
+		go func(re replicaEntry) {
+			// Set a read deadline on the connection
+			re.conn.SetReadDeadline(time.Now().Add(time.Duration(timeoutMs)*time.Millisecond + 100*time.Millisecond))
+			defer re.conn.SetReadDeadline(time.Time{})
+
+			parts, err := ReadArray(re.reader)
+			if err != nil {
+				return
+			}
+			// Expect: REPLCONF ACK <offset>
+			if len(parts) == 3 && strings.ToUpper(parts[0]) == "REPLCONF" && strings.ToUpper(parts[1]) == "ACK" {
+				off, err := strconv.ParseInt(parts[2], 10, 64)
+				if err == nil {
+					resultCh <- ackResult{offset: off}
+					return
+				}
+			}
+		}(r)
+	}
+
+	for {
+		select {
+		case res := <-resultCh:
+			if res.offset >= currentOffset {
+				acked++
+			}
+			if acked >= numReplicas {
+				return EncodeInteger(acked)
+			}
+		case <-deadline:
+			return EncodeInteger(acked)
 		}
 	}
 }

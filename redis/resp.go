@@ -44,6 +44,10 @@ func EncodeNullBulkString() []byte {
 	return []byte("$-1\r\n")
 }
 
+func EncodeInteger(n int) []byte {
+	return []byte(fmt.Sprintf(":%d\r\n", n))
+}
+
 func HandleEcho(args []string) ([]byte, error) {
 	if len(args) != 1 {
 		return nil, errors.New("ERR wrong number of arguments for 'echo' command")
