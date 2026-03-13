@@ -96,6 +96,9 @@ func (s *Server) listenToMaster() {
 			continue
 		}
 
+		// Calculate the byte size of this command for offset tracking
+		cmdBytes := len(EncodeArray(parts))
+
 		command := strings.ToUpper(parts[0])
 		args := parts[1:]
 
@@ -108,9 +111,18 @@ func (s *Server) listenToMaster() {
 			for _, key := range args {
 				s.store.Delete(key)
 			}
+		case "REPLCONF":
+			if len(args) >= 2 && strings.ToUpper(args[0]) == "GETACK" {
+				ack := EncodeArray([]string{"REPLCONF", "ACK", fmt.Sprintf("%d", s.replOffset)})
+				if _, err := s.masterConn.Write(ack); err != nil {
+					fmt.Println("Error sending ACK to master:", err)
+				}
+			}
 		default:
 			fmt.Printf("Replica ignoring propagated command: %s\n", command)
 		}
+
+		s.replOffset += int64(cmdBytes)
 	}
 }
 

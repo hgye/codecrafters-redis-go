@@ -32,6 +32,7 @@ type Server struct {
 	masterReader *bufio.Reader
 	replicaMu    sync.Mutex
 	replicas     []net.Conn
+	replOffset   int64
 }
 
 func NewServer(l net.Listener, cfg Config, replica *ReplicaInfo, port string) *Server {
