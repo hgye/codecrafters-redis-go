@@ -2,6 +2,7 @@ package redis
 
 import (
 	"bufio"
+	"encoding/hex"
 	"fmt"
 	"net"
 	"os"
@@ -147,6 +148,10 @@ func (s *Server) handleClient(conn net.Conn) {
 			conn.Write(EncodeSimpleString("OK"))
 		case "PSYNC":
 			conn.Write(EncodeSimpleString("FULLRESYNC 8371445fff36d3332a088d7be77bf1419d907b2d 0"))
+			// Send empty RDB file
+			rdbData := emptyRDB()
+			conn.Write([]byte(fmt.Sprintf("$%d\r\n", len(rdbData))))
+			conn.Write(rdbData)
 		default:
 			conn.Write(EncodeError("ERR unknown command"))
 		}
@@ -155,4 +160,11 @@ func (s *Server) handleClient(conn net.Conn) {
 
 func (s *Server) Stop() {
 	s.l.Close()
+}
+
+// emptyRDB returns the bytes of a minimal valid RDB file.
+func emptyRDB() []byte {
+	const emptyRDBHex = "524544495330303131fa0972656469732d76657205372e322e30fa0a72656469732d62697473c040fa056374696d65c26d08bc65fa08757365642d6d656dc2b0c41000fa08616f662d62617365c000fff06e3bfe0d694736"
+	data, _ := hex.DecodeString(emptyRDBHex)
+	return data
 }

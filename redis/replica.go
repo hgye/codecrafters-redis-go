@@ -2,8 +2,11 @@ package redis
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
+	"io"
 	"net"
+	"strconv"
 	"strings"
 )
 
@@ -68,7 +71,46 @@ func (s *Server) Handshake() error {
 	}
 
 	fmt.Println("Handshake complete:", resp)
+
+	// Step 5: Receive RDB file from master
+	if err := s.receiveRDB(reader); err != nil {
+		conn.Close()
+		return fmt.Errorf("receive RDB: %w", err)
+	}
+
 	s.masterConn = conn
+	return nil
+}
+
+// receiveRDB reads the RDB bulk transfer ($<len>\r\n<bytes>) and parses it into the store.
+func (s *Server) receiveRDB(reader *bufio.Reader) error {
+	// Read the bulk string header: $<length>\r\n
+	line, err := reader.ReadString('\n')
+	if err != nil {
+		return fmt.Errorf("read RDB header: %w", err)
+	}
+	line = strings.TrimSpace(line)
+	if !strings.HasPrefix(line, "$") {
+		return fmt.Errorf("expected RDB bulk string, got: %q", line)
+	}
+	length, err := strconv.Atoi(line[1:])
+	if err != nil {
+		return fmt.Errorf("parse RDB length: %w", err)
+	}
+
+	// Read exactly <length> bytes of RDB data (no trailing \r\n for file transfer)
+	rdbData := make([]byte, length)
+	if _, err := io.ReadFull(reader, rdbData); err != nil {
+		return fmt.Errorf("read RDB data: %w", err)
+	}
+
+	fmt.Printf("Received RDB file: %d bytes\n", length)
+
+	// Parse the RDB content into the store
+	if err := parseRDB(bytes.NewReader(rdbData), s.store); err != nil {
+		return fmt.Errorf("parse RDB: %w", err)
+	}
+
 	return nil
 }
 
