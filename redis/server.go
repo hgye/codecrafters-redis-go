@@ -196,6 +196,9 @@ func (s *Server) executeCommand(parts []string, conn net.Conn, reader *bufio.Rea
 	}
 
 	command := strings.ToUpper(parts[0])
+	if s.isSubscribedConnection(conn) && !isAllowedInSubscribeMode(command) {
+		return EncodeError(fmt.Sprintf("ERR Can't execute '%s': only (P|S)SUBSCRIBE / (P|S)UNSUBSCRIBE / PING / QUIT / RESET are allowed in this context", strings.ToLower(command))), false, false
+	}
 	args := parts[1:]
 
 	switch command {
@@ -333,6 +336,23 @@ func (s *Server) executeCommand(parts []string, conn net.Conn, reader *bufio.Rea
 	default:
 		return EncodeError("ERR unknown command"), false, false
 	}
+}
+
+func isAllowedInSubscribeMode(command string) bool {
+	switch command {
+	case "SUBSCRIBE", "UNSUBSCRIBE", "PSUBSCRIBE", "PUNSUBSCRIBE", "SSUBSCRIBE", "SUNSUBSCRIBE", "PING", "QUIT", "RESET":
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *Server) isSubscribedConnection(conn net.Conn) bool {
+	s.pubsubMu.Lock()
+	defer s.pubsubMu.Unlock()
+
+	channels, ok := s.connSubs[conn]
+	return ok && len(channels) > 0
 }
 
 func (s *Server) handleSubscribe(conn net.Conn, channels []string) ([]byte, error) {
