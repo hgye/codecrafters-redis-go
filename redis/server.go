@@ -199,7 +199,7 @@ func (s *Server) executeCommand(parts []string, conn net.Conn, reader *bufio.Rea
 	command := strings.ToUpper(parts[0])
 	inSubscribeMode := s.isSubscribedConnection(conn)
 	if inSubscribeMode && !isAllowedInSubscribeMode(command) {
-		return EncodeError(fmt.Sprintf("ERR Can't execute '%s': only (P|S)SUBSCRIBE / (P|S)UNSUBSCRIBE / PING / QUIT / RESET are allowed in this context", strings.ToLower(command))), false, false
+		return EncodeError(fmt.Sprintf("ERR Can't execute '%s': only (P|S)SUBSCRIBE / (P|S)UNSUBSCRIBE / PING / QUIT / RESET / PUBLISH are allowed in this context", strings.ToLower(command))), false, false
 	}
 	args := parts[1:]
 
@@ -372,7 +372,7 @@ func handlePing(args []string, inSubscribeMode bool) ([]byte, error) {
 
 func isAllowedInSubscribeMode(command string) bool {
 	switch command {
-	case "SUBSCRIBE", "UNSUBSCRIBE", "PSUBSCRIBE", "PUNSUBSCRIBE", "SSUBSCRIBE", "SUNSUBSCRIBE", "PING", "QUIT", "RESET":
+	case "SUBSCRIBE", "UNSUBSCRIBE", "PSUBSCRIBE", "PUNSUBSCRIBE", "SSUBSCRIBE", "SUNSUBSCRIBE", "PING", "QUIT", "RESET", "PUBLISH":
 		return true
 	default:
 		return false
