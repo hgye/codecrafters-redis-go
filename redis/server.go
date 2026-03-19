@@ -133,6 +133,14 @@ func (s *Server) handleClient(conn net.Conn) {
 			}
 			conn.Write(resp)
 			s.propagate(parts)
+		case "INCR":
+			resp, err := HandleIncr(args, s.store)
+			if err != nil {
+				conn.Write(EncodeError(err.Error()))
+				continue
+			}
+			conn.Write(resp)
+			s.propagate(parts)
 		case "XADD":
 			resp, err := HandleXAdd(args, s.store)
 			if err != nil {
@@ -277,7 +285,7 @@ func (s *Server) handleWait(args []string) []byte {
 
 	// If nothing was propagated, all connected replicas are up to date
 	if currentOffset == 0 {
-		return EncodeInteger(len(replicas))
+		return EncodeInteger(int64(len(replicas)))
 	}
 
 	// Send REPLCONF GETACK * to all replicas
@@ -299,7 +307,7 @@ func (s *Server) handleWait(args []string) []byte {
 			}
 		}
 		if acked >= numReplicas {
-			return EncodeInteger(acked)
+			return EncodeInteger(int64(acked))
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
@@ -314,7 +322,7 @@ func (s *Server) handleWait(args []string) []byte {
 			acked++
 		}
 	}
-	return EncodeInteger(acked)
+	return EncodeInteger(int64(acked))
 }
 
 // emptyRDB returns the bytes of a minimal valid RDB file.

@@ -2,6 +2,8 @@ package redis
 
 import (
 	"fmt"
+	"math"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -289,4 +291,40 @@ func (s *Store) Delete(key string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.data, key)
+}
+
+func (s *Store) Incr(key string) (int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	current, ok := s.data[key]
+	if !ok {
+		s.data[key] = StringValue{Value: "1"}
+		return 1, nil
+	}
+
+	switch typed := current.(type) {
+	case StreamValue:
+		return 0, fmt.Errorf("WRONGTYPE Operation against a key holding the wrong kind of value")
+	case StringValue:
+		if !typed.ExpiresAt.IsZero() && !time.Now().Before(typed.ExpiresAt) {
+			s.data[key] = StringValue{Value: "1"}
+			return 1, nil
+		}
+
+		n, err := strconv.ParseInt(typed.Value, 10, 64)
+		if err != nil {
+			return 0, fmt.Errorf("ERR value is not an integer or out of range")
+		}
+		if n == math.MaxInt64 {
+			return 0, fmt.Errorf("ERR increment or decrement would overflow")
+		}
+
+		n++
+		typed.Value = strconv.FormatInt(n, 10)
+		s.data[key] = typed
+		return n, nil
+	default:
+		return 0, fmt.Errorf("WRONGTYPE Operation against a key holding the wrong kind of value")
+	}
 }

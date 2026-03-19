@@ -48,7 +48,7 @@ func EncodeNullArray() []byte {
 	return []byte("*-1\r\n")
 }
 
-func EncodeInteger(n int) []byte {
+func EncodeInteger(n int64) []byte {
 	return []byte(fmt.Sprintf(":%d\r\n", n))
 }
 
@@ -240,6 +240,19 @@ func HandleXRead(args []string, store *Store) ([]byte, error) {
 	}
 
 	return EncodeNullArray(), nil
+}
+
+func HandleIncr(args []string, store *Store) ([]byte, error) {
+	if len(args) != 1 {
+		return nil, errors.New("ERR wrong number of arguments for 'incr' command")
+	}
+
+	v, err := store.Incr(args[0])
+	if err != nil {
+		return nil, err
+	}
+
+	return EncodeInteger(v), nil
 }
 
 func EncodeStreamEntries(entries []StreamEntry) []byte {
