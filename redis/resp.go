@@ -312,6 +312,19 @@ func HandleZRange(args []string, store *Store) ([]byte, error) {
 	return EncodeArray(items), nil
 }
 
+func HandleZCard(args []string, store *Store) ([]byte, error) {
+	if len(args) != 1 {
+		return nil, errors.New("ERR wrong number of arguments for 'zcard' command")
+	}
+
+	count, err := store.ZCard(args[0])
+	if err != nil {
+		return nil, err
+	}
+
+	return EncodeInteger(count), nil
+}
+
 func HandleIncr(args []string, store *Store) ([]byte, error) {
 	if len(args) != 1 {
 		return nil, errors.New("ERR wrong number of arguments for 'incr' command")

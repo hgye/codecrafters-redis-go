@@ -334,6 +334,20 @@ func (s *Store) ZRange(key string, start, stop int, withScores bool) ([]string, 
 	return out, nil
 }
 
+func (s *Store) ZCard(key string) (int64, error) {
+	v, ok := s.activeValue(key)
+	if !ok {
+		return 0, nil
+	}
+
+	zv, isZSet := v.(ZSetValue)
+	if !isZSet {
+		return 0, fmt.Errorf("WRONGTYPE Operation against a key holding the wrong kind of value")
+	}
+
+	return int64(len(zv.Scores)), nil
+}
+
 func (s *Store) RPush(key string, values []string) (int64, error) {
 	if len(values) == 0 {
 		return 0, fmt.Errorf("ERR wrong number of arguments for 'rpush' command")
