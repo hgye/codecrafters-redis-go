@@ -317,19 +317,39 @@ func HandleLLen(args []string, store *Store) ([]byte, error) {
 }
 
 func HandleLPop(args []string, store *Store) ([]byte, error) {
-	if len(args) != 1 {
+	if len(args) != 1 && len(args) != 2 {
 		return nil, errors.New("ERR wrong number of arguments for 'lpop' command")
 	}
 
-	item, ok, err := store.LPop(args[0])
+	if len(args) == 1 {
+		item, ok, err := store.LPop(args[0])
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			return EncodeNullBulkString(), nil
+		}
+
+		return EncodeBulkString(item), nil
+	}
+
+	count, err := strconv.Atoi(args[1])
+	if err != nil {
+		return nil, errors.New("ERR value is not an integer or out of range")
+	}
+	if count <= 0 {
+		return nil, errors.New("ERR value is out of range, must be positive")
+	}
+
+	popped, err := store.LPopCount(args[0], count)
 	if err != nil {
 		return nil, err
 	}
-	if !ok {
-		return EncodeNullBulkString(), nil
+	if len(popped) == 0 {
+		return EncodeNullArray(), nil
 	}
 
-	return EncodeBulkString(item), nil
+	return EncodeArray(popped), nil
 }
 
 func EncodeStreamEntries(entries []StreamEntry) []byte {

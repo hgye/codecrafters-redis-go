@@ -248,39 +248,55 @@ func (s *Store) LLen(key string) (int64, error) {
 	return int64(len(lv.Items)), nil
 }
 
-func (s *Store) LPop(key string) (string, bool, error) {
+func (s *Store) LPopCount(key string, count int) ([]string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	current, ok := s.data[key]
 	if !ok {
-		return "", false, nil
+		return []string{}, nil
 	}
 
 	switch typed := current.(type) {
 	case ListValue:
 		if len(typed.Items) == 0 {
 			delete(s.data, key)
-			return "", false, nil
+			return []string{}, nil
 		}
 
-		item := typed.Items[0]
-		typed.Items = typed.Items[1:]
+		n := count
+		if n > len(typed.Items) {
+			n = len(typed.Items)
+		}
+
+		popped := append([]string(nil), typed.Items[:n]...)
+		typed.Items = typed.Items[n:]
 		if len(typed.Items) == 0 {
 			delete(s.data, key)
 		} else {
 			s.data[key] = typed
 		}
-		return item, true, nil
+		return popped, nil
 	case StringValue:
 		if !typed.ExpiresAt.IsZero() && !time.Now().Before(typed.ExpiresAt) {
 			delete(s.data, key)
-			return "", false, nil
+			return []string{}, nil
 		}
-		return "", false, fmt.Errorf("WRONGTYPE Operation against a key holding the wrong kind of value")
+		return nil, fmt.Errorf("WRONGTYPE Operation against a key holding the wrong kind of value")
 	default:
-		return "", false, fmt.Errorf("WRONGTYPE Operation against a key holding the wrong kind of value")
+		return nil, fmt.Errorf("WRONGTYPE Operation against a key holding the wrong kind of value")
 	}
+}
+
+func (s *Store) LPop(key string) (string, bool, error) {
+	popped, err := s.LPopCount(key, 1)
+	if err != nil {
+		return "", false, err
+	}
+	if len(popped) == 0 {
+		return "", false, nil
+	}
+	return popped[0], true, nil
 }
 
 func (s *Store) XRange(key, start, end string) ([]StreamEntry, error) {
