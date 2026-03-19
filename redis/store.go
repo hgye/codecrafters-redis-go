@@ -85,6 +85,32 @@ func (s *Store) getOrCreateStreamForWrite(key string) (StreamValue, error) {
 	}
 }
 
+// getOrCreateListForWrite resolves a list value for RPUSH.
+// It creates one when key is missing, removes expired string values,
+// and returns WRONGTYPE for active non-list values.
+func (s *Store) getOrCreateListForWrite(key string) (ListValue, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	current, ok := s.data[key]
+	if !ok {
+		return ListValue{}, nil
+	}
+
+	switch typed := current.(type) {
+	case ListValue:
+		return typed, nil
+	case StringValue:
+		if !typed.ExpiresAt.IsZero() && !time.Now().Before(typed.ExpiresAt) {
+			delete(s.data, key)
+			return ListValue{}, nil
+		}
+		return ListValue{}, fmt.Errorf("WRONGTYPE Operation against a key holding the wrong kind of value")
+	default:
+		return ListValue{}, fmt.Errorf("WRONGTYPE Operation against a key holding the wrong kind of value")
+	}
+}
+
 func (s *Store) Set(key, value string) {
 	s.bindValue(key, StringValue{Value: value})
 }
@@ -126,6 +152,21 @@ func (s *Store) AddStreamEntry(key, id string, fields []string) (string, error) 
 	s.bindValue(key, st)
 
 	return finalID, nil
+}
+
+func (s *Store) RPush(key string, values []string) (int64, error) {
+	if len(values) == 0 {
+		return 0, fmt.Errorf("ERR wrong number of arguments for 'rpush' command")
+	}
+
+	lv, err := s.getOrCreateListForWrite(key)
+	if err != nil {
+		return 0, err
+	}
+
+	lv.Items = append(lv.Items, values...)
+	s.bindValue(key, lv)
+	return int64(len(lv.Items)), nil
 }
 
 func (s *Store) XRange(key, start, end string) ([]StreamEntry, error) {
@@ -250,6 +291,8 @@ func (s *Store) Keys() []string {
 			}
 		case StreamValue:
 			keys = append(keys, k)
+		case ListValue:
+			keys = append(keys, k)
 		}
 	}
 	s.mu.RUnlock()
@@ -262,14 +305,12 @@ func (s *Store) Get(key string) (string, bool, bool) {
 		return "", false, false
 	}
 
-	switch typed := v.(type) {
-	case StreamValue:
-		return "", false, true
-	case StringValue:
+	if typed, isString := v.(StringValue); isString {
 		return typed.Value, true, false
-	default:
-		return "", false, false
 	}
+
+	// Any existing non-string type is a WRONGTYPE for GET.
+	return "", false, true
 }
 
 func (s *Store) TypeOf(key string) string {
@@ -277,14 +318,7 @@ func (s *Store) TypeOf(key string) string {
 	if !ok {
 		return "none"
 	}
-	switch v.(type) {
-	case StreamValue:
-		return "stream"
-	case StringValue:
-		return "string"
-	default:
-		return "none"
-	}
+	return v.Kind()
 }
 
 func (s *Store) Delete(key string) {
@@ -303,28 +337,26 @@ func (s *Store) Incr(key string) (int64, error) {
 		return 1, nil
 	}
 
-	switch typed := current.(type) {
-	case StreamValue:
-		return 0, fmt.Errorf("WRONGTYPE Operation against a key holding the wrong kind of value")
-	case StringValue:
-		if !typed.ExpiresAt.IsZero() && !time.Now().Before(typed.ExpiresAt) {
-			s.data[key] = StringValue{Value: "1"}
-			return 1, nil
-		}
-
-		n, err := strconv.ParseInt(typed.Value, 10, 64)
-		if err != nil {
-			return 0, fmt.Errorf("ERR value is not an integer or out of range")
-		}
-		if n == math.MaxInt64 {
-			return 0, fmt.Errorf("ERR increment or decrement would overflow")
-		}
-
-		n++
-		typed.Value = strconv.FormatInt(n, 10)
-		s.data[key] = typed
-		return n, nil
-	default:
+	typed, isString := current.(StringValue)
+	if !isString {
 		return 0, fmt.Errorf("WRONGTYPE Operation against a key holding the wrong kind of value")
 	}
+
+	if !typed.ExpiresAt.IsZero() && !time.Now().Before(typed.ExpiresAt) {
+		s.data[key] = StringValue{Value: "1"}
+		return 1, nil
+	}
+
+	n, err := strconv.ParseInt(typed.Value, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("ERR value is not an integer or out of range")
+	}
+	if n == math.MaxInt64 {
+		return 0, fmt.Errorf("ERR increment or decrement would overflow")
+	}
+
+	n++
+	typed.Value = strconv.FormatInt(n, 10)
+	s.data[key] = typed
+	return n, nil
 }

@@ -255,6 +255,19 @@ func HandleIncr(args []string, store *Store) ([]byte, error) {
 	return EncodeInteger(v), nil
 }
 
+func HandleRPush(args []string, store *Store) ([]byte, error) {
+	if len(args) < 2 {
+		return nil, errors.New("ERR wrong number of arguments for 'rpush' command")
+	}
+
+	length, err := store.RPush(args[0], args[1:])
+	if err != nil {
+		return nil, err
+	}
+
+	return EncodeInteger(length), nil
+}
+
 func EncodeStreamEntries(entries []StreamEntry) []byte {
 	var buf []byte
 	buf = append(buf, []byte(fmt.Sprintf("*%d\r\n", len(entries)))...)

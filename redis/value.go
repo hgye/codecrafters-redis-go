@@ -9,7 +9,7 @@ import (
 )
 
 type Value interface {
-	isValue()
+	Kind() string
 }
 
 type StringValue struct {
@@ -17,7 +17,7 @@ type StringValue struct {
 	ExpiresAt time.Time // zero value means no expiry
 }
 
-func (StringValue) isValue() {}
+func (StringValue) Kind() string { return "string" }
 
 type StreamEntry struct {
 	ID     string
@@ -30,7 +30,13 @@ type StreamValue struct {
 	LastSeq uint64
 }
 
-func (StreamValue) isValue() {}
+func (StreamValue) Kind() string { return "stream" }
+
+type ListValue struct {
+	Items []string
+}
+
+func (ListValue) Kind() string { return "list" }
 
 func parseXAddID(raw string, lastMs, lastSeq uint64) (ms uint64, seq uint64, generated bool, err error) {
 	if raw == "*" {
