@@ -325,6 +325,22 @@ func HandleZCard(args []string, store *Store) ([]byte, error) {
 	return EncodeInteger(count), nil
 }
 
+func HandleZScore(args []string, store *Store) ([]byte, error) {
+	if len(args) != 2 {
+		return nil, errors.New("ERR wrong number of arguments for 'zscore' command")
+	}
+
+	score, ok, err := store.ZScore(args[0], args[1])
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return EncodeNullBulkString(), nil
+	}
+
+	return EncodeBulkString(strconv.FormatFloat(score, 'g', -1, 64)), nil
+}
+
 func HandleIncr(args []string, store *Store) ([]byte, error) {
 	if len(args) != 1 {
 		return nil, errors.New("ERR wrong number of arguments for 'incr' command")
