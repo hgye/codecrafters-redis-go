@@ -289,6 +289,15 @@ func EncodeArray(items []string) []byte {
 	return buf
 }
 
+func EncodeRESPArray(items [][]byte) []byte {
+	var buf []byte
+	buf = append(buf, []byte(fmt.Sprintf("*%d\r\n", len(items)))...)
+	for _, item := range items {
+		buf = append(buf, item...)
+	}
+	return buf
+}
+
 func HandleKeys(args []string, store *Store) ([]byte, error) {
 	if len(args) != 1 {
 		return nil, errors.New("ERR wrong number of arguments for 'keys' command")

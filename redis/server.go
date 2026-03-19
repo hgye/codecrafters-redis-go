@@ -31,6 +31,10 @@ type replicaEntry struct {
 	ackOffset int64
 }
 
+type queuedCommand struct {
+	parts []string
+}
+
 type Server struct {
 	l            net.Listener
 	store        *Store
@@ -77,6 +81,8 @@ func (s *Server) Start() {
 
 func (s *Server) handleClient(conn net.Conn) {
 	reader := bufio.NewReader(conn)
+	inMulti := false
+	queued := make([]queuedCommand, 0)
 	for {
 		// Prefer RESP arrays (Codecrafters sends commands as RESP arrays)
 		b, err := reader.Peek(1)
@@ -113,116 +119,159 @@ func (s *Server) handleClient(conn net.Conn) {
 			continue
 		}
 		command := strings.ToUpper(parts[0])
-		args := parts[1:]
+
+		if inMulti {
+			switch command {
+			case "MULTI":
+				conn.Write(EncodeError("ERR MULTI calls can not be nested"))
+			case "DISCARD":
+				queued = queued[:0]
+				inMulti = false
+				conn.Write(EncodeSimpleString("OK"))
+			case "EXEC":
+				replies := make([][]byte, 0, len(queued))
+				for _, qc := range queued {
+					reply, propagate, closeConn := s.executeCommand(qc.parts, conn, reader)
+					if reply == nil {
+						reply = EncodeError("ERR unknown command")
+					}
+					replies = append(replies, reply)
+					if propagate {
+						s.propagate(qc.parts)
+					}
+					if closeConn {
+						conn.Write(EncodeRESPArray(replies))
+						return
+					}
+				}
+				queued = queued[:0]
+				inMulti = false
+				conn.Write(EncodeRESPArray(replies))
+			default:
+				queued = append(queued, queuedCommand{parts: append([]string(nil), parts...)})
+				conn.Write(EncodeSimpleString("QUEUED"))
+			}
+			continue
+		}
 
 		switch command {
-		case "PING":
-			conn.Write(EncodeSimpleString("PONG"))
-		case "ECHO":
-			resp, err := HandleEcho(args)
-			if err != nil {
-				conn.Write(EncodeError(err.Error()))
-				continue
-			}
-			conn.Write(resp)
-		case "SET":
-			resp, err := HandleSet(args, s.store)
-			if err != nil {
-				conn.Write(EncodeError(err.Error()))
-				continue
-			}
-			conn.Write(resp)
-			s.propagate(parts)
-		case "INCR":
-			resp, err := HandleIncr(args, s.store)
-			if err != nil {
-				conn.Write(EncodeError(err.Error()))
-				continue
-			}
-			conn.Write(resp)
-			s.propagate(parts)
-		case "XADD":
-			resp, err := HandleXAdd(args, s.store)
-			if err != nil {
-				conn.Write(EncodeError(err.Error()))
-				continue
-			}
-			conn.Write(resp)
-			s.propagate(parts)
-		case "XRANGE":
-			resp, err := HandleXRange(args, s.store)
-			if err != nil {
-				conn.Write(EncodeError(err.Error()))
-				continue
-			}
-			conn.Write(resp)
-		case "XREAD":
-			resp, err := HandleXRead(args, s.store)
-			if err != nil {
-				conn.Write(EncodeError(err.Error()))
-				continue
-			}
-			conn.Write(resp)
-		case "GET":
-			resp, err := HandleGet(args, s.store)
-			if err != nil {
-				conn.Write(EncodeError(err.Error()))
-				continue
-			}
-			conn.Write(resp)
-		case "TYPE":
-			resp, err := HandleType(args, s.store)
-			if err != nil {
-				conn.Write(EncodeError(err.Error()))
-				continue
-			}
-			conn.Write(resp)
-		case "KEYS":
-			resp, err := HandleKeys(args, s.store)
-			if err != nil {
-				conn.Write(EncodeError(err.Error()))
-				continue
-			}
-			conn.Write(resp)
-		case "INFO":
-			resp, err := HandleInfo(args, s.replica)
-			if err != nil {
-				conn.Write(EncodeError(err.Error()))
-				continue
-			}
-			conn.Write(resp)
-		case "CONFIG":
-			resp, err := HandleConfig(args, s.config)
-			if err != nil {
-				conn.Write(EncodeError(err.Error()))
-				continue
-			}
-			conn.Write(resp)
-		case "REPLCONF":
+		case "MULTI":
+			inMulti = true
+			queued = queued[:0]
 			conn.Write(EncodeSimpleString("OK"))
-		case "PSYNC":
-			conn.Write(EncodeSimpleString("FULLRESYNC 8371445fff36d3332a088d7be77bf1419d907b2d 0"))
-			// Send empty RDB file
-			rdbData := emptyRDB()
-			conn.Write([]byte(fmt.Sprintf("$%d\r\n", len(rdbData))))
-			conn.Write(rdbData)
-			// Register this connection as a replica and start ACK reader
-			re := &replicaEntry{
-				conn:   conn,
-				reader: reader,
-			}
-			s.replicaMu.Lock()
-			s.replicas = append(s.replicas, re)
-			s.replicaMu.Unlock()
-			// Connection is now a replication stream; stop processing commands
-			go s.readReplicaACKs(re)
-			return
-		case "WAIT":
-			resp := s.handleWait(args)
-			conn.Write(resp)
+		case "EXEC":
+			conn.Write(EncodeError("ERR EXEC without MULTI"))
+		case "DISCARD":
+			conn.Write(EncodeError("ERR DISCARD without MULTI"))
 		default:
-			conn.Write(EncodeError("ERR unknown command"))
+			reply, propagate, closeConn := s.executeCommand(parts, conn, reader)
+			if reply != nil {
+				conn.Write(reply)
+			}
+			if propagate {
+				s.propagate(parts)
+			}
+			if closeConn {
+				return
+			}
 		}
+	}
+}
+
+func (s *Server) executeCommand(parts []string, conn net.Conn, reader *bufio.Reader) (reply []byte, propagate bool, closeConn bool) {
+	if len(parts) == 0 {
+		return EncodeError("ERR protocol error"), false, false
+	}
+
+	command := strings.ToUpper(parts[0])
+	args := parts[1:]
+
+	switch command {
+	case "PING":
+		return EncodeSimpleString("PONG"), false, false
+	case "ECHO":
+		resp, err := HandleEcho(args)
+		if err != nil {
+			return EncodeError(err.Error()), false, false
+		}
+		return resp, false, false
+	case "SET":
+		resp, err := HandleSet(args, s.store)
+		if err != nil {
+			return EncodeError(err.Error()), false, false
+		}
+		return resp, true, false
+	case "INCR":
+		resp, err := HandleIncr(args, s.store)
+		if err != nil {
+			return EncodeError(err.Error()), false, false
+		}
+		return resp, true, false
+	case "XADD":
+		resp, err := HandleXAdd(args, s.store)
+		if err != nil {
+			return EncodeError(err.Error()), false, false
+		}
+		return resp, true, false
+	case "XRANGE":
+		resp, err := HandleXRange(args, s.store)
+		if err != nil {
+			return EncodeError(err.Error()), false, false
+		}
+		return resp, false, false
+	case "XREAD":
+		resp, err := HandleXRead(args, s.store)
+		if err != nil {
+			return EncodeError(err.Error()), false, false
+		}
+		return resp, false, false
+	case "GET":
+		resp, err := HandleGet(args, s.store)
+		if err != nil {
+			return EncodeError(err.Error()), false, false
+		}
+		return resp, false, false
+	case "TYPE":
+		resp, err := HandleType(args, s.store)
+		if err != nil {
+			return EncodeError(err.Error()), false, false
+		}
+		return resp, false, false
+	case "KEYS":
+		resp, err := HandleKeys(args, s.store)
+		if err != nil {
+			return EncodeError(err.Error()), false, false
+		}
+		return resp, false, false
+	case "INFO":
+		resp, err := HandleInfo(args, s.replica)
+		if err != nil {
+			return EncodeError(err.Error()), false, false
+		}
+		return resp, false, false
+	case "CONFIG":
+		resp, err := HandleConfig(args, s.config)
+		if err != nil {
+			return EncodeError(err.Error()), false, false
+		}
+		return resp, false, false
+	case "REPLCONF":
+		return EncodeSimpleString("OK"), false, false
+	case "PSYNC":
+		conn.Write(EncodeSimpleString("FULLRESYNC 8371445fff36d3332a088d7be77bf1419d907b2d 0"))
+		rdbData := emptyRDB()
+		conn.Write([]byte(fmt.Sprintf("$%d\r\n", len(rdbData))))
+		conn.Write(rdbData)
+		re := &replicaEntry{conn: conn, reader: reader}
+		s.replicaMu.Lock()
+		s.replicas = append(s.replicas, re)
+		s.replicaMu.Unlock()
+		go s.readReplicaACKs(re)
+		return nil, false, true
+	case "WAIT":
+		return s.handleWait(args), false, false
+	default:
+		return EncodeError("ERR unknown command"), false, false
 	}
 }
 
