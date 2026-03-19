@@ -169,6 +169,50 @@ func (s *Store) RPush(key string, values []string) (int64, error) {
 	return int64(len(lv.Items)), nil
 }
 
+func (s *Store) LRange(key string, start, stop int) ([]string, error) {
+	v, ok := s.activeValue(key)
+	if !ok {
+		return []string{}, nil
+	}
+
+	lv, isList := v.(ListValue)
+	if !isList {
+		return nil, fmt.Errorf("WRONGTYPE Operation against a key holding the wrong kind of value")
+	}
+
+	n := len(lv.Items)
+	if n == 0 {
+		return []string{}, nil
+	}
+
+	if start < 0 {
+		start = n + start
+	}
+	if stop < 0 {
+		stop = n + stop
+	}
+
+	if start < 0 {
+		start = 0
+	}
+	if stop < 0 {
+		return []string{}, nil
+	}
+
+	if start >= n {
+		return []string{}, nil
+	}
+	if stop >= n {
+		stop = n - 1
+	}
+	if start > stop {
+		return []string{}, nil
+	}
+
+	res := append([]string(nil), lv.Items[start:stop+1]...)
+	return res, nil
+}
+
 func (s *Store) XRange(key, start, end string) ([]StreamEntry, error) {
 	v, ok := s.activeValue(key)
 	if !ok {

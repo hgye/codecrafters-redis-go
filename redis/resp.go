@@ -268,6 +268,28 @@ func HandleRPush(args []string, store *Store) ([]byte, error) {
 	return EncodeInteger(length), nil
 }
 
+func HandleLRange(args []string, store *Store) ([]byte, error) {
+	if len(args) != 3 {
+		return nil, errors.New("ERR wrong number of arguments for 'lrange' command")
+	}
+
+	start, err := strconv.Atoi(args[1])
+	if err != nil {
+		return nil, errors.New("ERR value is not an integer or out of range")
+	}
+	stop, err := strconv.Atoi(args[2])
+	if err != nil {
+		return nil, errors.New("ERR value is not an integer or out of range")
+	}
+
+	items, err := store.LRange(args[0], start, stop)
+	if err != nil {
+		return nil, err
+	}
+
+	return EncodeArray(items), nil
+}
+
 func EncodeStreamEntries(entries []StreamEntry) []byte {
 	var buf []byte
 	buf = append(buf, []byte(fmt.Sprintf("*%d\r\n", len(entries)))...)
