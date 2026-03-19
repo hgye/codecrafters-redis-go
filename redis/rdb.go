@@ -137,10 +137,7 @@ func readKeyValueWithType(valueType byte, r io.Reader, store *Store, expiresAt t
 	if err != nil {
 		return fmt.Errorf("read value: %w", err)
 	}
-
-	store.mu.Lock()
-	store.kv[key] = storeEntry{value: value, expiresAt: expiresAt}
-	store.mu.Unlock()
+	store.setStringAt(key, value, expiresAt)
 	return nil
 }
 

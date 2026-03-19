@@ -94,7 +94,10 @@ func HandleGet(args []string, store *Store) ([]byte, error) {
 	if len(args) != 1 {
 		return nil, errors.New("ERR wrong number of arguments for 'get' command")
 	}
-	value, ok := store.Get(args[0])
+	value, ok, isStream := store.Get(args[0])
+	if isStream {
+		return nil, errors.New("WRONGTYPE Operation against a key holding the wrong kind of value")
+	}
 	if !ok {
 		return EncodeNullBulkString(), nil
 	}
@@ -105,11 +108,27 @@ func HandleType(args []string, store *Store) ([]byte, error) {
 	if len(args) != 1 {
 		return nil, errors.New("ERR wrong number of arguments for 'type' command")
 	}
-	_, ok := store.Get(args[0])
-	if !ok {
-		return EncodeSimpleString("none"), nil
+	return EncodeSimpleString(store.TypeOf(args[0])), nil
+}
+
+func HandleXAdd(args []string, store *Store) ([]byte, error) {
+	if len(args) < 4 {
+		return nil, errors.New("ERR wrong number of arguments for 'xadd' command")
 	}
-	return EncodeSimpleString("string"), nil
+	if (len(args)-2)%2 != 0 {
+		return nil, errors.New("ERR wrong number of arguments for 'xadd' command")
+	}
+
+	key := args[0]
+	id := args[1]
+	fields := args[2:]
+
+	entryID, err := store.AddStreamEntry(key, id, fields)
+	if err != nil {
+		return nil, err
+	}
+
+	return EncodeBulkString(entryID), nil
 }
 
 func EncodeArray(items []string) []byte {

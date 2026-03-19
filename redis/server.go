@@ -133,6 +133,14 @@ func (s *Server) handleClient(conn net.Conn) {
 			}
 			conn.Write(resp)
 			s.propagate(parts)
+		case "XADD":
+			resp, err := HandleXAdd(args, s.store)
+			if err != nil {
+				conn.Write(EncodeError(err.Error()))
+				continue
+			}
+			conn.Write(resp)
+			s.propagate(parts)
 		case "GET":
 			resp, err := HandleGet(args, s.store)
 			if err != nil {

@@ -107,6 +107,10 @@ func (s *Server) listenToMaster() {
 			if _, err := HandleSet(args, s.store); err != nil {
 				fmt.Println("Error applying SET from master:", err)
 			}
+		case "XADD":
+			if _, err := HandleXAdd(args, s.store); err != nil {
+				fmt.Println("Error applying XADD from master:", err)
+			}
 		case "DEL":
 			for _, key := range args {
 				s.store.Delete(key)
