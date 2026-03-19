@@ -3,6 +3,7 @@ package redis
 import (
 	"fmt"
 	"math"
+	"sort"
 	"strconv"
 	"sync"
 	"time"
@@ -208,6 +209,42 @@ func (s *Store) ZAdd(key string, entries []ZSetEntry) (int64, error) {
 
 	s.bindValue(key, zv)
 	return added, nil
+}
+
+func (s *Store) ZRank(key, member string) (int64, bool, error) {
+	v, ok := s.activeValue(key)
+	if !ok {
+		return 0, false, nil
+	}
+
+	zv, isZSet := v.(ZSetValue)
+	if !isZSet {
+		return 0, false, fmt.Errorf("WRONGTYPE Operation against a key holding the wrong kind of value")
+	}
+
+	if _, exists := zv.Scores[member]; !exists {
+		return 0, false, nil
+	}
+
+	entries := make([]ZSetEntry, 0, len(zv.Scores))
+	for m, score := range zv.Scores {
+		entries = append(entries, ZSetEntry{Member: m, Score: score})
+	}
+
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].Score == entries[j].Score {
+			return entries[i].Member < entries[j].Member
+		}
+		return entries[i].Score < entries[j].Score
+	})
+
+	for i, entry := range entries {
+		if entry.Member == member {
+			return int64(i), true, nil
+		}
+	}
+
+	return 0, false, nil
 }
 
 func (s *Store) RPush(key string, values []string) (int64, error) {

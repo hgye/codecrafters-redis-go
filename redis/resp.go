@@ -266,6 +266,22 @@ func HandleZAdd(args []string, store *Store) ([]byte, error) {
 	return EncodeInteger(added), nil
 }
 
+func HandleZRank(args []string, store *Store) ([]byte, error) {
+	if len(args) != 2 {
+		return nil, errors.New("ERR wrong number of arguments for 'zrank' command")
+	}
+
+	rank, ok, err := store.ZRank(args[0], args[1])
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return EncodeNullBulkString(), nil
+	}
+
+	return EncodeInteger(rank), nil
+}
+
 func HandleIncr(args []string, store *Store) ([]byte, error) {
 	if len(args) != 1 {
 		return nil, errors.New("ERR wrong number of arguments for 'incr' command")
