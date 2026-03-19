@@ -620,6 +620,23 @@ func HandleConfig(args []string, cfg Config) ([]byte, error) {
 	return EncodeArray([]string{key, value}), nil
 }
 
+func HandleACL(args []string) ([]byte, error) {
+	if len(args) < 1 {
+		return nil, errors.New("ERR wrong number of arguments for 'acl' command")
+	}
+
+	subcommand := strings.ToUpper(args[0])
+	switch subcommand {
+	case "WHOAMI":
+		if len(args) != 1 {
+			return nil, errors.New("ERR wrong number of arguments for 'acl|whoami' command")
+		}
+		return EncodeBulkString("default"), nil
+	default:
+		return nil, errors.New("ERR unsupported ACL subcommand")
+	}
+}
+
 // ReadArray reads a RESP array where all elements are bulk strings.
 // It returns the array items as UTF-8 strings (without trailing CRLF).
 func ReadArray(r *bufio.Reader) ([]string, error) {
