@@ -282,6 +282,36 @@ func HandleZRank(args []string, store *Store) ([]byte, error) {
 	return EncodeInteger(rank), nil
 }
 
+func HandleZRange(args []string, store *Store) ([]byte, error) {
+	if len(args) != 3 && len(args) != 4 {
+		return nil, errors.New("ERR wrong number of arguments for 'zrange' command")
+	}
+
+	start, err := strconv.Atoi(args[1])
+	if err != nil {
+		return nil, errors.New("ERR value is not an integer or out of range")
+	}
+	stop, err := strconv.Atoi(args[2])
+	if err != nil {
+		return nil, errors.New("ERR value is not an integer or out of range")
+	}
+
+	withScores := false
+	if len(args) == 4 {
+		if strings.ToUpper(args[3]) != "WITHSCORES" {
+			return nil, errors.New("ERR syntax error")
+		}
+		withScores = true
+	}
+
+	items, err := store.ZRange(args[0], start, stop, withScores)
+	if err != nil {
+		return nil, err
+	}
+
+	return EncodeArray(items), nil
+}
+
 func HandleIncr(args []string, store *Store) ([]byte, error) {
 	if len(args) != 1 {
 		return nil, errors.New("ERR wrong number of arguments for 'incr' command")

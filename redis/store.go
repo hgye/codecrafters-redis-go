@@ -24,6 +24,46 @@ type ZSetEntry struct {
 	Score  float64
 }
 
+type indexRange struct {
+	Start int
+	Stop  int
+}
+
+func (r indexRange) normalize(length int) (start int, stop int, ok bool) {
+	if length == 0 {
+		return 0, 0, false
+	}
+
+	start = r.Start
+	stop = r.Stop
+
+	if start < 0 {
+		start = length + start
+	}
+	if stop < 0 {
+		stop = length + stop
+	}
+
+	if start < 0 {
+		start = 0
+	}
+	if stop < 0 {
+		return 0, 0, false
+	}
+
+	if start >= length {
+		return 0, 0, false
+	}
+	if stop >= length {
+		stop = length - 1
+	}
+	if start > stop {
+		return 0, 0, false
+	}
+
+	return start, stop, true
+}
+
 func NewStore() *Store {
 	return &Store{data: make(map[string]Value)}
 }
@@ -247,6 +287,53 @@ func (s *Store) ZRank(key, member string) (int64, bool, error) {
 	return 0, false, nil
 }
 
+func (s *Store) ZRange(key string, start, stop int, withScores bool) ([]string, error) {
+	v, ok := s.activeValue(key)
+	if !ok {
+		return []string{}, nil
+	}
+
+	zv, isZSet := v.(ZSetValue)
+	if !isZSet {
+		return nil, fmt.Errorf("WRONGTYPE Operation against a key holding the wrong kind of value")
+	}
+
+	entries := make([]ZSetEntry, 0, len(zv.Scores))
+	for m, score := range zv.Scores {
+		entries = append(entries, ZSetEntry{Member: m, Score: score})
+	}
+
+	sort.Slice(entries, func(i, j int) bool {
+		if entries[i].Score == entries[j].Score {
+			return entries[i].Member < entries[j].Member
+		}
+		return entries[i].Score < entries[j].Score
+	})
+
+	n := len(entries)
+	r := indexRange{Start: start, Stop: stop}
+	from, to, ok := r.normalize(n)
+	if !ok {
+		return []string{}, nil
+	}
+
+	selected := entries[from : to+1]
+	if !withScores {
+		members := make([]string, 0, len(selected))
+		for _, entry := range selected {
+			members = append(members, entry.Member)
+		}
+		return members, nil
+	}
+
+	out := make([]string, 0, len(selected)*2)
+	for _, entry := range selected {
+		out = append(out, entry.Member)
+		out = append(out, strconv.FormatFloat(entry.Score, 'g', -1, 64))
+	}
+	return out, nil
+}
+
 func (s *Store) RPush(key string, values []string) (int64, error) {
 	if len(values) == 0 {
 		return 0, fmt.Errorf("ERR wrong number of arguments for 'rpush' command")
@@ -295,35 +382,13 @@ func (s *Store) LRange(key string, start, stop int) ([]string, error) {
 	}
 
 	n := len(lv.Items)
-	if n == 0 {
+	r := indexRange{Start: start, Stop: stop}
+	from, to, ok := r.normalize(n)
+	if !ok {
 		return []string{}, nil
 	}
 
-	if start < 0 {
-		start = n + start
-	}
-	if stop < 0 {
-		stop = n + stop
-	}
-
-	if start < 0 {
-		start = 0
-	}
-	if stop < 0 {
-		return []string{}, nil
-	}
-
-	if start >= n {
-		return []string{}, nil
-	}
-	if stop >= n {
-		stop = n - 1
-	}
-	if start > stop {
-		return []string{}, nil
-	}
-
-	res := append([]string(nil), lv.Items[start:stop+1]...)
+	res := append([]string(nil), lv.Items[from:to+1]...)
 	return res, nil
 }
 

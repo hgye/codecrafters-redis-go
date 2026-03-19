@@ -291,6 +291,12 @@ func (s *Server) executeCommand(parts []string, conn net.Conn, reader *bufio.Rea
 			return EncodeError(err.Error()), false, false
 		}
 		return resp, false, false
+	case "ZRANGE":
+		resp, err := HandleZRange(args, s.store)
+		if err != nil {
+			return EncodeError(err.Error()), false, false
+		}
+		return resp, false, false
 	case "XADD":
 		resp, err := HandleXAdd(args, s.store)
 		if err != nil {
