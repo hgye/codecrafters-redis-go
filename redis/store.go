@@ -248,6 +248,41 @@ func (s *Store) LLen(key string) (int64, error) {
 	return int64(len(lv.Items)), nil
 }
 
+func (s *Store) LPop(key string) (string, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	current, ok := s.data[key]
+	if !ok {
+		return "", false, nil
+	}
+
+	switch typed := current.(type) {
+	case ListValue:
+		if len(typed.Items) == 0 {
+			delete(s.data, key)
+			return "", false, nil
+		}
+
+		item := typed.Items[0]
+		typed.Items = typed.Items[1:]
+		if len(typed.Items) == 0 {
+			delete(s.data, key)
+		} else {
+			s.data[key] = typed
+		}
+		return item, true, nil
+	case StringValue:
+		if !typed.ExpiresAt.IsZero() && !time.Now().Before(typed.ExpiresAt) {
+			delete(s.data, key)
+			return "", false, nil
+		}
+		return "", false, fmt.Errorf("WRONGTYPE Operation against a key holding the wrong kind of value")
+	default:
+		return "", false, fmt.Errorf("WRONGTYPE Operation against a key holding the wrong kind of value")
+	}
+}
+
 func (s *Store) XRange(key, start, end string) ([]StreamEntry, error) {
 	v, ok := s.activeValue(key)
 	if !ok {

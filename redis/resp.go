@@ -316,6 +316,22 @@ func HandleLLen(args []string, store *Store) ([]byte, error) {
 	return EncodeInteger(length), nil
 }
 
+func HandleLPop(args []string, store *Store) ([]byte, error) {
+	if len(args) != 1 {
+		return nil, errors.New("ERR wrong number of arguments for 'lpop' command")
+	}
+
+	item, ok, err := store.LPop(args[0])
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return EncodeNullBulkString(), nil
+	}
+
+	return EncodeBulkString(item), nil
+}
+
 func EncodeStreamEntries(entries []StreamEntry) []byte {
 	var buf []byte
 	buf = append(buf, []byte(fmt.Sprintf("*%d\r\n", len(entries)))...)
