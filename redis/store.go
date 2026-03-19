@@ -169,6 +169,27 @@ func (s *Store) RPush(key string, values []string) (int64, error) {
 	return int64(len(lv.Items)), nil
 }
 
+func (s *Store) LPush(key string, values []string) (int64, error) {
+	if len(values) == 0 {
+		return 0, fmt.Errorf("ERR wrong number of arguments for 'lpush' command")
+	}
+
+	lv, err := s.getOrCreateListForWrite(key)
+	if err != nil {
+		return 0, err
+	}
+
+	// Redis LPUSH pushes values from left to right to the head.
+	newItems := make([]string, 0, len(values)+len(lv.Items))
+	for i := len(values) - 1; i >= 0; i-- {
+		newItems = append(newItems, values[i])
+	}
+	newItems = append(newItems, lv.Items...)
+	lv.Items = newItems
+	s.bindValue(key, lv)
+	return int64(len(lv.Items)), nil
+}
+
 func (s *Store) LRange(key string, start, stop int) ([]string, error) {
 	v, ok := s.activeValue(key)
 	if !ok {

@@ -268,6 +268,19 @@ func HandleRPush(args []string, store *Store) ([]byte, error) {
 	return EncodeInteger(length), nil
 }
 
+func HandleLPush(args []string, store *Store) ([]byte, error) {
+	if len(args) < 2 {
+		return nil, errors.New("ERR wrong number of arguments for 'lpush' command")
+	}
+
+	length, err := store.LPush(args[0], args[1:])
+	if err != nil {
+		return nil, err
+	}
+
+	return EncodeInteger(length), nil
+}
+
 func HandleLRange(args []string, store *Store) ([]byte, error) {
 	if len(args) != 3 {
 		return nil, errors.New("ERR wrong number of arguments for 'lrange' command")

@@ -115,6 +115,10 @@ func (s *Server) listenToMaster() {
 			if _, err := HandleRPush(args, s.store); err != nil {
 				fmt.Println("Error applying RPUSH from master:", err)
 			}
+		case "LPUSH":
+			if _, err := HandleLPush(args, s.store); err != nil {
+				fmt.Println("Error applying LPUSH from master:", err)
+			}
 		case "XADD":
 			if _, err := HandleXAdd(args, s.store); err != nil {
 				fmt.Println("Error applying XADD from master:", err)
