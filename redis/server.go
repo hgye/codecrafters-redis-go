@@ -140,6 +140,13 @@ func (s *Server) handleClient(conn net.Conn) {
 				continue
 			}
 			conn.Write(resp)
+		case "TYPE":
+			resp, err := HandleType(args, s.store)
+			if err != nil {
+				conn.Write(EncodeError(err.Error()))
+				continue
+			}
+			conn.Write(resp)
 		case "KEYS":
 			resp, err := HandleKeys(args, s.store)
 			if err != nil {

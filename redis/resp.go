@@ -101,6 +101,17 @@ func HandleGet(args []string, store *Store) ([]byte, error) {
 	return EncodeBulkString(value), nil
 }
 
+func HandleType(args []string, store *Store) ([]byte, error) {
+	if len(args) != 1 {
+		return nil, errors.New("ERR wrong number of arguments for 'type' command")
+	}
+	_, ok := store.Get(args[0])
+	if !ok {
+		return EncodeSimpleString("none"), nil
+	}
+	return EncodeSimpleString("string"), nil
+}
+
 func EncodeArray(items []string) []byte {
 	var buf []byte
 	buf = append(buf, []byte(fmt.Sprintf("*%d\r\n", len(items)))...)
