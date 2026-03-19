@@ -38,6 +38,12 @@ type ListValue struct {
 
 func (ListValue) Kind() string { return "list" }
 
+type ZSetValue struct {
+	Scores map[string]float64
+}
+
+func (ZSetValue) Kind() string { return "zset" }
+
 func parseXAddID(raw string, lastMs, lastSeq uint64) (ms uint64, seq uint64, generated bool, err error) {
 	if raw == "*" {
 		nowMs := uint64(time.Now().UnixMilli())

@@ -18,6 +18,11 @@ type XReadStreamResult struct {
 	Entries []StreamEntry
 }
 
+type ZSetEntry struct {
+	Member string
+	Score  float64
+}
+
 func NewStore() *Store {
 	return &Store{data: make(map[string]Value)}
 }
@@ -111,6 +116,35 @@ func (s *Store) getOrCreateListForWrite(key string) (ListValue, error) {
 	}
 }
 
+// getOrCreateZSetForWrite resolves a sorted set value for ZADD.
+// It creates one when key is missing, removes expired string values,
+// and returns WRONGTYPE for active non-zset values.
+func (s *Store) getOrCreateZSetForWrite(key string) (ZSetValue, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	current, ok := s.data[key]
+	if !ok {
+		return ZSetValue{Scores: make(map[string]float64)}, nil
+	}
+
+	switch typed := current.(type) {
+	case ZSetValue:
+		if typed.Scores == nil {
+			typed.Scores = make(map[string]float64)
+		}
+		return typed, nil
+	case StringValue:
+		if !typed.ExpiresAt.IsZero() && !time.Now().Before(typed.ExpiresAt) {
+			delete(s.data, key)
+			return ZSetValue{Scores: make(map[string]float64)}, nil
+		}
+		return ZSetValue{}, fmt.Errorf("WRONGTYPE Operation against a key holding the wrong kind of value")
+	default:
+		return ZSetValue{}, fmt.Errorf("WRONGTYPE Operation against a key holding the wrong kind of value")
+	}
+}
+
 func (s *Store) Set(key, value string) {
 	s.bindValue(key, StringValue{Value: value})
 }
@@ -152,6 +186,28 @@ func (s *Store) AddStreamEntry(key, id string, fields []string) (string, error) 
 	s.bindValue(key, st)
 
 	return finalID, nil
+}
+
+func (s *Store) ZAdd(key string, entries []ZSetEntry) (int64, error) {
+	if len(entries) == 0 {
+		return 0, fmt.Errorf("ERR wrong number of arguments for 'zadd' command")
+	}
+
+	zv, err := s.getOrCreateZSetForWrite(key)
+	if err != nil {
+		return 0, err
+	}
+
+	added := int64(0)
+	for _, entry := range entries {
+		if _, exists := zv.Scores[entry.Member]; !exists {
+			added++
+		}
+		zv.Scores[entry.Member] = entry.Score
+	}
+
+	s.bindValue(key, zv)
+	return added, nil
 }
 
 func (s *Store) RPush(key string, values []string) (int64, error) {
@@ -422,6 +478,8 @@ func (s *Store) Keys() []string {
 		case StreamValue:
 			keys = append(keys, k)
 		case ListValue:
+			keys = append(keys, k)
+		case ZSetValue:
 			keys = append(keys, k)
 		}
 	}

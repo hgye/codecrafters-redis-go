@@ -279,6 +279,12 @@ func (s *Server) executeCommand(parts []string, conn net.Conn, reader *bufio.Rea
 		}
 		n := s.publish(args[0], args[1])
 		return EncodeInteger(int64(n)), false, false
+	case "ZADD":
+		resp, err := HandleZAdd(args, s.store)
+		if err != nil {
+			return EncodeError(err.Error()), false, false
+		}
+		return resp, true, false
 	case "XADD":
 		resp, err := HandleXAdd(args, s.store)
 		if err != nil {

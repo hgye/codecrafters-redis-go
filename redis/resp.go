@@ -242,6 +242,30 @@ func HandleXRead(args []string, store *Store) ([]byte, error) {
 	return EncodeNullArray(), nil
 }
 
+func HandleZAdd(args []string, store *Store) ([]byte, error) {
+	if len(args) < 3 || len(args)%2 == 0 {
+		return nil, errors.New("ERR wrong number of arguments for 'zadd' command")
+	}
+
+	key := args[0]
+	rawEntries := args[1:]
+	entries := make([]ZSetEntry, 0, len(rawEntries)/2)
+	for i := 0; i < len(rawEntries); i += 2 {
+		score, err := strconv.ParseFloat(rawEntries[i], 64)
+		if err != nil {
+			return nil, errors.New("ERR value is not a valid float")
+		}
+		entries = append(entries, ZSetEntry{Member: rawEntries[i+1], Score: score})
+	}
+
+	added, err := store.ZAdd(key, entries)
+	if err != nil {
+		return nil, err
+	}
+
+	return EncodeInteger(added), nil
+}
+
 func HandleIncr(args []string, store *Store) ([]byte, error) {
 	if len(args) != 1 {
 		return nil, errors.New("ERR wrong number of arguments for 'incr' command")
