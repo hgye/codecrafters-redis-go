@@ -141,6 +141,13 @@ func (s *Server) handleClient(conn net.Conn) {
 			}
 			conn.Write(resp)
 			s.propagate(parts)
+		case "XRANGE":
+			resp, err := HandleXRange(args, s.store)
+			if err != nil {
+				conn.Write(EncodeError(err.Error()))
+				continue
+			}
+			conn.Write(resp)
 		case "GET":
 			resp, err := HandleGet(args, s.store)
 			if err != nil {

@@ -121,6 +121,44 @@ func (s *Store) AddStreamEntry(key, id string, fields []string) (string, error) 
 	return finalID, nil
 }
 
+func (s *Store) XRange(key, start, end string) ([]StreamEntry, error) {
+	v, ok := s.activeValue(key)
+	if !ok {
+		return []StreamEntry{}, nil
+	}
+
+	st, isStream := v.(StreamValue)
+	if !isStream {
+		return nil, fmt.Errorf("WRONGTYPE Operation against a key holding the wrong kind of value")
+	}
+
+	startMs, startSeq, startLowerUnbounded, _, err := parseRangeBound(start, true)
+	if err != nil {
+		return nil, err
+	}
+	endMs, endSeq, _, endUpperUnbounded, err := parseRangeBound(end, false)
+	if err != nil {
+		return nil, err
+	}
+
+	result := make([]StreamEntry, 0)
+	for _, entry := range st.Entries {
+		ems, eseq, err := parseStreamID(entry.ID)
+		if err != nil {
+			continue
+		}
+		if !startLowerUnbounded && compareStreamID(ems, eseq, startMs, startSeq) < 0 {
+			continue
+		}
+		if !endUpperUnbounded && compareStreamID(ems, eseq, endMs, endSeq) > 0 {
+			continue
+		}
+		result = append(result, StreamEntry{ID: entry.ID, Fields: append([]string(nil), entry.Fields...)})
+	}
+
+	return result, nil
+}
+
 func (s *Store) Keys() []string {
 	s.mu.RLock()
 	keys := make([]string, 0, len(s.data))

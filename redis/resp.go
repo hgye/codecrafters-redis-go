@@ -131,6 +131,33 @@ func HandleXAdd(args []string, store *Store) ([]byte, error) {
 	return EncodeBulkString(entryID), nil
 }
 
+func HandleXRange(args []string, store *Store) ([]byte, error) {
+	if len(args) != 3 {
+		return nil, errors.New("ERR wrong number of arguments for 'xrange' command")
+	}
+
+	entries, err := store.XRange(args[0], args[1], args[2])
+	if err != nil {
+		return nil, err
+	}
+
+	return EncodeStreamEntries(entries), nil
+}
+
+func EncodeStreamEntries(entries []StreamEntry) []byte {
+	var buf []byte
+	buf = append(buf, []byte(fmt.Sprintf("*%d\r\n", len(entries)))...)
+	for _, entry := range entries {
+		buf = append(buf, []byte("*2\r\n")...)
+		buf = append(buf, EncodeBulkString(entry.ID)...)
+		buf = append(buf, []byte(fmt.Sprintf("*%d\r\n", len(entry.Fields)))...)
+		for _, field := range entry.Fields {
+			buf = append(buf, EncodeBulkString(field)...)
+		}
+	}
+	return buf
+}
+
 func EncodeArray(items []string) []byte {
 	var buf []byte
 	buf = append(buf, []byte(fmt.Sprintf("*%d\r\n", len(items)))...)
