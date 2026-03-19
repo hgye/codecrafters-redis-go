@@ -47,10 +47,21 @@ type Server struct {
 	replicas     []*replicaEntry
 	replOffset   int64
 	masterOffset int64 // bytes propagated to replicas
+	pubsubMu     sync.Mutex
+	channelSubs  map[string]map[net.Conn]struct{}
+	connSubs     map[net.Conn]map[string]struct{}
 }
 
 func NewServer(l net.Listener, cfg Config, replica *ReplicaInfo, port string) *Server {
-	s := &Server{l: l, store: NewStore(), config: cfg, replica: replica, port: port}
+	s := &Server{
+		l:           l,
+		store:       NewStore(),
+		config:      cfg,
+		replica:     replica,
+		port:        port,
+		channelSubs: make(map[string]map[net.Conn]struct{}),
+		connSubs:    make(map[net.Conn]map[string]struct{}),
+	}
 	if err := LoadRDB(cfg, s.store); err != nil {
 		fmt.Println("Warning: failed to load RDB:", err)
 	}
@@ -81,6 +92,7 @@ func (s *Server) Start() {
 
 func (s *Server) handleClient(conn net.Conn) {
 	reader := bufio.NewReader(conn)
+	defer s.unsubscribeConnection(conn)
 	inMulti := false
 	queued := make([]queuedCommand, 0)
 	for {
@@ -243,6 +255,18 @@ func (s *Server) executeCommand(parts []string, conn net.Conn, reader *bufio.Rea
 			return EncodeError(err.Error()), false, false
 		}
 		return resp, false, false
+	case "SUBSCRIBE":
+		resp, err := s.handleSubscribe(conn, args)
+		if err != nil {
+			return EncodeError(err.Error()), false, false
+		}
+		return resp, false, false
+	case "PUBLISH":
+		if len(args) != 2 {
+			return EncodeError("ERR wrong number of arguments for 'publish' command"), false, false
+		}
+		n := s.publish(args[0], args[1])
+		return EncodeInteger(int64(n)), false, false
 	case "XADD":
 		resp, err := HandleXAdd(args, s.store)
 		if err != nil {
@@ -309,6 +333,98 @@ func (s *Server) executeCommand(parts []string, conn net.Conn, reader *bufio.Rea
 	default:
 		return EncodeError("ERR unknown command"), false, false
 	}
+}
+
+func (s *Server) handleSubscribe(conn net.Conn, channels []string) ([]byte, error) {
+	if len(channels) == 0 {
+		return nil, fmt.Errorf("ERR wrong number of arguments for 'subscribe' command")
+	}
+
+	s.pubsubMu.Lock()
+	defer s.pubsubMu.Unlock()
+
+	if _, ok := s.connSubs[conn]; !ok {
+		s.connSubs[conn] = make(map[string]struct{})
+	}
+
+	var out []byte
+	for _, ch := range channels {
+		if _, ok := s.channelSubs[ch]; !ok {
+			s.channelSubs[ch] = make(map[net.Conn]struct{})
+		}
+		s.channelSubs[ch][conn] = struct{}{}
+		s.connSubs[conn][ch] = struct{}{}
+
+		count := len(s.connSubs[conn])
+		out = append(out, encodeSubscribeAck(ch, count)...)
+	}
+
+	return out, nil
+}
+
+func (s *Server) publish(channel, message string) int {
+	s.pubsubMu.Lock()
+	subs, ok := s.channelSubs[channel]
+	if !ok || len(subs) == 0 {
+		s.pubsubMu.Unlock()
+		return 0
+	}
+
+	targets := make([]net.Conn, 0, len(subs))
+	for c := range subs {
+		targets = append(targets, c)
+	}
+	s.pubsubMu.Unlock()
+
+	payload := encodePubSubMessage(channel, message)
+	delivered := 0
+	for _, c := range targets {
+		if _, err := c.Write(payload); err != nil {
+			s.unsubscribeConnection(c)
+			continue
+		}
+		delivered++
+	}
+
+	return delivered
+}
+
+func (s *Server) unsubscribeConnection(conn net.Conn) {
+	s.pubsubMu.Lock()
+	defer s.pubsubMu.Unlock()
+
+	channels, ok := s.connSubs[conn]
+	if !ok {
+		return
+	}
+
+	for ch := range channels {
+		subs, exists := s.channelSubs[ch]
+		if !exists {
+			continue
+		}
+		delete(subs, conn)
+		if len(subs) == 0 {
+			delete(s.channelSubs, ch)
+		}
+	}
+	delete(s.connSubs, conn)
+}
+
+func encodeSubscribeAck(channel string, count int) []byte {
+	return EncodeRESPArray([][]byte{
+		EncodeBulkString("subscribe"),
+		EncodeBulkString(channel),
+		EncodeInteger(int64(count)),
+	})
+}
+
+func encodePubSubMessage(channel, message string) []byte {
+	return EncodeRESPArray([][]byte{
+		EncodeBulkString("message"),
+		EncodeBulkString(channel),
+		EncodeBulkString(message),
+	})
 }
 
 func (s *Server) Stop() {
