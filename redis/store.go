@@ -74,6 +74,10 @@ func (s *Store) bindValue(key string, value Value) {
 	s.data[key] = value
 }
 
+func isExpiredString(v StringValue) bool {
+	return !v.ExpiresAt.IsZero() && !time.Now().Before(v.ExpiresAt)
+}
+
 // activeValue returns the current value for key after lazy expiration cleanup.
 func (s *Store) activeValue(key string) (Value, bool) {
 	s.mu.RLock()
@@ -83,7 +87,7 @@ func (s *Store) activeValue(key string) (Value, bool) {
 		return nil, false
 	}
 	if sv, isString := v.(StringValue); isString {
-		if !sv.ExpiresAt.IsZero() && !time.Now().Before(sv.ExpiresAt) {
+		if isExpiredString(sv) {
 			s.mu.RUnlock()
 
 			s.mu.Lock()
@@ -93,7 +97,7 @@ func (s *Store) activeValue(key string) (Value, bool) {
 				return nil, false
 			}
 			if sv2, isString2 := v2.(StringValue); isString2 {
-				if !sv2.ExpiresAt.IsZero() && !time.Now().Before(sv2.ExpiresAt) {
+				if isExpiredString(sv2) {
 					delete(s.data, key)
 					return nil, false
 				}
@@ -121,7 +125,7 @@ func (s *Store) getOrCreateStreamForWrite(key string) (StreamValue, error) {
 	case StreamValue:
 		return typed, nil
 	case StringValue:
-		if !typed.ExpiresAt.IsZero() && !time.Now().Before(typed.ExpiresAt) {
+		if isExpiredString(typed) {
 			delete(s.data, key)
 			return StreamValue{}, nil
 		}
@@ -147,7 +151,7 @@ func (s *Store) getOrCreateListForWrite(key string) (ListValue, error) {
 	case ListValue:
 		return typed, nil
 	case StringValue:
-		if !typed.ExpiresAt.IsZero() && !time.Now().Before(typed.ExpiresAt) {
+		if isExpiredString(typed) {
 			delete(s.data, key)
 			return ListValue{}, nil
 		}
@@ -176,7 +180,7 @@ func (s *Store) getOrCreateZSetForWrite(key string) (ZSetValue, error) {
 		}
 		return typed, nil
 	case StringValue:
-		if !typed.ExpiresAt.IsZero() && !time.Now().Before(typed.ExpiresAt) {
+		if isExpiredString(typed) {
 			delete(s.data, key)
 			return ZSetValue{Scores: make(map[string]float64)}, nil
 		}
@@ -367,6 +371,47 @@ func (s *Store) ZScore(key, member string) (float64, bool, error) {
 	return score, true, nil
 }
 
+func (s *Store) ZRem(key string, members []string) (int64, error) {
+	if len(members) == 0 {
+		return 0, fmt.Errorf("ERR wrong number of arguments for 'zrem' command")
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	current, ok := s.data[key]
+	if !ok {
+		return 0, nil
+	}
+
+	zv, isZSet := current.(ZSetValue)
+	if !isZSet {
+		if sv, isString := current.(StringValue); isString {
+			if isExpiredString(sv) {
+				delete(s.data, key)
+				return 0, nil
+			}
+		}
+		return 0, fmt.Errorf("WRONGTYPE Operation against a key holding the wrong kind of value")
+	}
+
+	removed := int64(0)
+	for _, member := range members {
+		if _, exists := zv.Scores[member]; exists {
+			delete(zv.Scores, member)
+			removed++
+		}
+	}
+
+	if len(zv.Scores) == 0 {
+		delete(s.data, key)
+	} else {
+		s.data[key] = zv
+	}
+
+	return removed, nil
+}
+
 func (s *Store) RPush(key string, values []string) (int64, error) {
 	if len(values) == 0 {
 		return 0, fmt.Errorf("ERR wrong number of arguments for 'rpush' command")
@@ -469,7 +514,7 @@ func (s *Store) LPopCount(key string, count int) ([]string, error) {
 		}
 		return popped, nil
 	case StringValue:
-		if !typed.ExpiresAt.IsZero() && !time.Now().Before(typed.ExpiresAt) {
+		if isExpiredString(typed) {
 			delete(s.data, key)
 			return []string{}, nil
 		}
@@ -665,7 +710,7 @@ func (s *Store) Incr(key string) (int64, error) {
 		return 0, fmt.Errorf("WRONGTYPE Operation against a key holding the wrong kind of value")
 	}
 
-	if !typed.ExpiresAt.IsZero() && !time.Now().Before(typed.ExpiresAt) {
+	if isExpiredString(typed) {
 		s.data[key] = StringValue{Value: "1"}
 		return 1, nil
 	}

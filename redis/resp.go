@@ -341,6 +341,19 @@ func HandleZScore(args []string, store *Store) ([]byte, error) {
 	return EncodeBulkString(strconv.FormatFloat(score, 'g', -1, 64)), nil
 }
 
+func HandleZRem(args []string, store *Store) ([]byte, error) {
+	if len(args) < 2 {
+		return nil, errors.New("ERR wrong number of arguments for 'zrem' command")
+	}
+
+	removed, err := store.ZRem(args[0], args[1:])
+	if err != nil {
+		return nil, err
+	}
+
+	return EncodeInteger(removed), nil
+}
+
 func HandleIncr(args []string, store *Store) ([]byte, error) {
 	if len(args) != 1 {
 		return nil, errors.New("ERR wrong number of arguments for 'incr' command")
