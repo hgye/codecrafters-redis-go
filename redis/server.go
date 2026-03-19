@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -196,14 +197,19 @@ func (s *Server) executeCommand(parts []string, conn net.Conn, reader *bufio.Rea
 	}
 
 	command := strings.ToUpper(parts[0])
-	if s.isSubscribedConnection(conn) && !isAllowedInSubscribeMode(command) {
+	inSubscribeMode := s.isSubscribedConnection(conn)
+	if inSubscribeMode && !isAllowedInSubscribeMode(command) {
 		return EncodeError(fmt.Sprintf("ERR Can't execute '%s': only (P|S)SUBSCRIBE / (P|S)UNSUBSCRIBE / PING / QUIT / RESET are allowed in this context", strings.ToLower(command))), false, false
 	}
 	args := parts[1:]
 
 	switch command {
 	case "PING":
-		return EncodeSimpleString("PONG"), false, false
+		resp, err := handlePing(args, inSubscribeMode)
+		if err != nil {
+			return EncodeError(err.Error()), false, false
+		}
+		return resp, false, false
 	case "ECHO":
 		resp, err := HandleEcho(args)
 		if err != nil {
@@ -263,6 +269,9 @@ func (s *Server) executeCommand(parts []string, conn net.Conn, reader *bufio.Rea
 		if err != nil {
 			return EncodeError(err.Error()), false, false
 		}
+		return resp, false, false
+	case "UNSUBSCRIBE":
+		resp := s.handleUnsubscribe(conn, args)
 		return resp, false, false
 	case "PUBLISH":
 		if len(args) != 2 {
@@ -338,6 +347,29 @@ func (s *Server) executeCommand(parts []string, conn net.Conn, reader *bufio.Rea
 	}
 }
 
+func handlePing(args []string, inSubscribeMode bool) ([]byte, error) {
+	if len(args) > 1 {
+		return nil, fmt.Errorf("ERR wrong number of arguments for 'ping' command")
+	}
+
+	if inSubscribeMode {
+		message := ""
+		if len(args) == 1 {
+			message = args[0]
+		}
+		return EncodeRESPArray([][]byte{
+			EncodeBulkString("pong"),
+			EncodeBulkString(message),
+		}), nil
+	}
+
+	if len(args) == 1 {
+		return EncodeBulkString(args[0]), nil
+	}
+
+	return EncodeSimpleString("PONG"), nil
+}
+
 func isAllowedInSubscribeMode(command string) bool {
 	switch command {
 	case "SUBSCRIBE", "UNSUBSCRIBE", "PSUBSCRIBE", "PUNSUBSCRIBE", "SSUBSCRIBE", "SUNSUBSCRIBE", "PING", "QUIT", "RESET":
@@ -380,6 +412,54 @@ func (s *Server) handleSubscribe(conn net.Conn, channels []string) ([]byte, erro
 	}
 
 	return out, nil
+}
+
+func (s *Server) handleUnsubscribe(conn net.Conn, channels []string) []byte {
+	s.pubsubMu.Lock()
+	defer s.pubsubMu.Unlock()
+
+	current, ok := s.connSubs[conn]
+	if !ok {
+		current = make(map[string]struct{})
+		s.connSubs[conn] = current
+	}
+
+	var targets []string
+	if len(channels) == 0 {
+		targets = make([]string, 0, len(current))
+		for ch := range current {
+			targets = append(targets, ch)
+		}
+		sort.Strings(targets)
+		if len(targets) == 0 {
+			return encodeUnsubscribeAck(nil, 0)
+		}
+	} else {
+		targets = channels
+	}
+
+	var out []byte
+	for _, ch := range targets {
+		if _, subscribed := current[ch]; subscribed {
+			delete(current, ch)
+			if subs, exists := s.channelSubs[ch]; exists {
+				delete(subs, conn)
+				if len(subs) == 0 {
+					delete(s.channelSubs, ch)
+				}
+			}
+		}
+
+		count := len(current)
+		channel := ch
+		out = append(out, encodeUnsubscribeAck(&channel, count)...)
+	}
+
+	if len(current) == 0 {
+		delete(s.connSubs, conn)
+	}
+
+	return out
 }
 
 func (s *Server) publish(channel, message string) int {
@@ -435,6 +515,19 @@ func encodeSubscribeAck(channel string, count int) []byte {
 	return EncodeRESPArray([][]byte{
 		EncodeBulkString("subscribe"),
 		EncodeBulkString(channel),
+		EncodeInteger(int64(count)),
+	})
+}
+
+func encodeUnsubscribeAck(channel *string, count int) []byte {
+	channelPayload := EncodeNullBulkString()
+	if channel != nil {
+		channelPayload = EncodeBulkString(*channel)
+	}
+
+	return EncodeRESPArray([][]byte{
+		EncodeBulkString("unsubscribe"),
+		channelPayload,
 		EncodeInteger(int64(count)),
 	})
 }
