@@ -632,6 +632,34 @@ func HandleACL(args []string) ([]byte, error) {
 			return nil, errors.New("ERR wrong number of arguments for 'acl|whoami' command")
 		}
 		return EncodeBulkString("default"), nil
+	case "GETUSER":
+		if len(args) != 2 {
+			return nil, errors.New("ERR wrong number of arguments for 'acl|getuser' command")
+		}
+		if args[1] != "default" {
+			return EncodeNullArray(), nil
+		}
+
+		return EncodeRESPArray([][]byte{
+			EncodeBulkString("flags"),
+			EncodeRESPArray([][]byte{
+				EncodeBulkString("on"),
+				EncodeBulkString("nopass"),
+				EncodeBulkString("allkeys"),
+				EncodeBulkString("allchannels"),
+				EncodeBulkString("allcommands"),
+			}),
+			EncodeBulkString("passwords"),
+			EncodeRESPArray([][]byte{}),
+			EncodeBulkString("commands"),
+			EncodeBulkString("+@all"),
+			EncodeBulkString("keys"),
+			EncodeBulkString("~*"),
+			EncodeBulkString("channels"),
+			EncodeBulkString("&*"),
+			EncodeBulkString("selectors"),
+			EncodeRESPArray([][]byte{}),
+		}), nil
 	default:
 		return nil, errors.New("ERR unsupported ACL subcommand")
 	}
