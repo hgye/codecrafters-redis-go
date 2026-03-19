@@ -234,6 +234,20 @@ func (s *Store) LRange(key string, start, stop int) ([]string, error) {
 	return res, nil
 }
 
+func (s *Store) LLen(key string) (int64, error) {
+	v, ok := s.activeValue(key)
+	if !ok {
+		return 0, nil
+	}
+
+	lv, isList := v.(ListValue)
+	if !isList {
+		return 0, fmt.Errorf("WRONGTYPE Operation against a key holding the wrong kind of value")
+	}
+
+	return int64(len(lv.Items)), nil
+}
+
 func (s *Store) XRange(key, start, end string) ([]StreamEntry, error) {
 	v, ok := s.activeValue(key)
 	if !ok {

@@ -303,6 +303,19 @@ func HandleLRange(args []string, store *Store) ([]byte, error) {
 	return EncodeArray(items), nil
 }
 
+func HandleLLen(args []string, store *Store) ([]byte, error) {
+	if len(args) != 1 {
+		return nil, errors.New("ERR wrong number of arguments for 'llen' command")
+	}
+
+	length, err := store.LLen(args[0])
+	if err != nil {
+		return nil, err
+	}
+
+	return EncodeInteger(length), nil
+}
+
 func EncodeStreamEntries(entries []StreamEntry) []byte {
 	var buf []byte
 	buf = append(buf, []byte(fmt.Sprintf("*%d\r\n", len(entries)))...)
