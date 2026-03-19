@@ -126,3 +126,14 @@ func compareStreamID(msA, seqA, msB, seqB uint64) int {
 	}
 	return 0
 }
+
+func parseXReadStartID(raw string) (ms uint64, seq uint64, err error) {
+	if !strings.Contains(raw, "-") {
+		ms, err = strconv.ParseUint(raw, 10, 64)
+		if err != nil {
+			return 0, 0, fmt.Errorf("ERR Invalid stream ID specified as stream command argument")
+		}
+		return ms, 0, nil
+	}
+	return parseStreamID(raw)
+}

@@ -44,6 +44,10 @@ func EncodeNullBulkString() []byte {
 	return []byte("$-1\r\n")
 }
 
+func EncodeNullArray() []byte {
+	return []byte("*-1\r\n")
+}
+
 func EncodeInteger(n int) []byte {
 	return []byte(fmt.Sprintf(":%d\r\n", n))
 }
@@ -144,6 +148,100 @@ func HandleXRange(args []string, store *Store) ([]byte, error) {
 	return EncodeStreamEntries(entries), nil
 }
 
+func HandleXRead(args []string, store *Store) ([]byte, error) {
+	if len(args) < 3 {
+		return nil, errors.New("ERR wrong number of arguments for 'xread' command")
+	}
+
+	count := 0
+	blockMs := int64(-1)
+	i := 0
+	for i < len(args) {
+		tok := strings.ToUpper(args[i])
+		if tok == "STREAMS" {
+			break
+		}
+		if i+1 >= len(args) {
+			return nil, errors.New("ERR syntax error")
+		}
+		switch tok {
+		case "COUNT":
+			n, err := strconv.Atoi(args[i+1])
+			if err != nil || n <= 0 {
+				return nil, errors.New("ERR value is not an integer or out of range")
+			}
+			count = n
+			i += 2
+		case "BLOCK":
+			n, err := strconv.ParseInt(args[i+1], 10, 64)
+			if err != nil || n < 0 {
+				return nil, errors.New("ERR value is not an integer or out of range")
+			}
+			blockMs = n
+			i += 2
+		default:
+			return nil, errors.New("ERR syntax error")
+		}
+	}
+
+	if i >= len(args) || strings.ToUpper(args[i]) != "STREAMS" {
+		return nil, errors.New("ERR syntax error")
+	}
+
+	rest := args[i+1:]
+	if len(rest) == 0 || len(rest)%2 != 0 {
+		return nil, errors.New("ERR Unbalanced XREAD list of streams")
+	}
+	n := len(rest) / 2
+	keys := rest[:n]
+	rawIDs := rest[n:]
+
+	startIDs, err := store.ResolveXReadStartIDs(keys, rawIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	results, err := store.XRead(keys, startIDs, count)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(results) > 0 {
+		return EncodeXReadResults(results), nil
+	}
+
+	if blockMs < 0 {
+		return EncodeNullArray(), nil
+	}
+
+	if blockMs == 0 {
+		for {
+			time.Sleep(10 * time.Millisecond)
+			results, err = store.XRead(keys, startIDs, count)
+			if err != nil {
+				return nil, err
+			}
+			if len(results) > 0 {
+				return EncodeXReadResults(results), nil
+			}
+		}
+	}
+
+	deadline := time.Now().Add(time.Duration(blockMs) * time.Millisecond)
+	for time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+		results, err = store.XRead(keys, startIDs, count)
+		if err != nil {
+			return nil, err
+		}
+		if len(results) > 0 {
+			return EncodeXReadResults(results), nil
+		}
+	}
+
+	return EncodeNullArray(), nil
+}
+
 func EncodeStreamEntries(entries []StreamEntry) []byte {
 	var buf []byte
 	buf = append(buf, []byte(fmt.Sprintf("*%d\r\n", len(entries)))...)
@@ -154,6 +252,17 @@ func EncodeStreamEntries(entries []StreamEntry) []byte {
 		for _, field := range entry.Fields {
 			buf = append(buf, EncodeBulkString(field)...)
 		}
+	}
+	return buf
+}
+
+func EncodeXReadResults(results []XReadStreamResult) []byte {
+	var buf []byte
+	buf = append(buf, []byte(fmt.Sprintf("*%d\r\n", len(results)))...)
+	for _, stream := range results {
+		buf = append(buf, []byte("*2\r\n")...)
+		buf = append(buf, EncodeBulkString(stream.Key)...)
+		buf = append(buf, EncodeStreamEntries(stream.Entries)...)
 	}
 	return buf
 }

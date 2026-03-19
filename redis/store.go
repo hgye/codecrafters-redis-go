@@ -11,6 +11,11 @@ type Store struct {
 	data map[string]Value
 }
 
+type XReadStreamResult struct {
+	Key     string
+	Entries []StreamEntry
+}
+
 func NewStore() *Store {
 	return &Store{data: make(map[string]Value)}
 }
@@ -157,6 +162,78 @@ func (s *Store) XRange(key, start, end string) ([]StreamEntry, error) {
 	}
 
 	return result, nil
+}
+
+func (s *Store) ResolveXReadStartIDs(keys []string, rawIDs []string) ([]string, error) {
+	if len(keys) != len(rawIDs) {
+		return nil, fmt.Errorf("ERR Unbalanced XREAD list of streams")
+	}
+
+	resolved := make([]string, len(rawIDs))
+	for i := range keys {
+		if rawIDs[i] != "$" {
+			resolved[i] = rawIDs[i]
+			continue
+		}
+
+		v, ok := s.activeValue(keys[i])
+		if !ok {
+			resolved[i] = "0-0"
+			continue
+		}
+
+		st, isStream := v.(StreamValue)
+		if !isStream {
+			return nil, fmt.Errorf("WRONGTYPE Operation against a key holding the wrong kind of value")
+		}
+		resolved[i] = fmt.Sprintf("%d-%d", st.LastMs, st.LastSeq)
+	}
+
+	return resolved, nil
+}
+
+func (s *Store) XRead(keys []string, startIDs []string, count int) ([]XReadStreamResult, error) {
+	if len(keys) != len(startIDs) {
+		return nil, fmt.Errorf("ERR Unbalanced XREAD list of streams")
+	}
+
+	results := make([]XReadStreamResult, 0, len(keys))
+	for i := range keys {
+		v, ok := s.activeValue(keys[i])
+		if !ok {
+			continue
+		}
+		st, isStream := v.(StreamValue)
+		if !isStream {
+			return nil, fmt.Errorf("WRONGTYPE Operation against a key holding the wrong kind of value")
+		}
+
+		startMs, startSeq, err := parseXReadStartID(startIDs[i])
+		if err != nil {
+			return nil, err
+		}
+
+		entries := make([]StreamEntry, 0)
+		for _, entry := range st.Entries {
+			ems, eseq, err := parseStreamID(entry.ID)
+			if err != nil {
+				continue
+			}
+			if compareStreamID(ems, eseq, startMs, startSeq) <= 0 {
+				continue
+			}
+			entries = append(entries, StreamEntry{ID: entry.ID, Fields: append([]string(nil), entry.Fields...)})
+			if count > 0 && len(entries) >= count {
+				break
+			}
+		}
+
+		if len(entries) > 0 {
+			results = append(results, XReadStreamResult{Key: keys[i], Entries: entries})
+		}
+	}
+
+	return results, nil
 }
 
 func (s *Store) Keys() []string {
