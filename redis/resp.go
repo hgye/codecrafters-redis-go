@@ -352,6 +352,64 @@ func HandleLPop(args []string, store *Store) ([]byte, error) {
 	return EncodeArray(popped), nil
 }
 
+func HandleBLPop(args []string, store *Store) ([]byte, error) {
+	if len(args) < 2 {
+		return nil, errors.New("ERR wrong number of arguments for 'blpop' command")
+	}
+
+	timeoutSeconds, err := strconv.ParseFloat(args[len(args)-1], 64)
+	if err != nil {
+		return nil, errors.New("ERR timeout is not a float or out of range")
+	}
+	if timeoutSeconds < 0 {
+		return nil, errors.New("ERR timeout is negative")
+	}
+
+	keys := args[:len(args)-1]
+
+	tryPop := func() ([]byte, error) {
+		for _, key := range keys {
+			item, ok, err := store.LPop(key)
+			if err != nil {
+				return nil, err
+			}
+			if ok {
+				return EncodeArray([]string{key, item}), nil
+			}
+		}
+		return nil, nil
+	}
+
+	if resp, err := tryPop(); err != nil {
+		return nil, err
+	} else if resp != nil {
+		return resp, nil
+	}
+
+	if timeoutSeconds == 0 {
+		for {
+			time.Sleep(10 * time.Millisecond)
+			if resp, err := tryPop(); err != nil {
+				return nil, err
+			} else if resp != nil {
+				return resp, nil
+			}
+		}
+	}
+
+	deadline := time.Now().Add(time.Duration(timeoutSeconds * float64(time.Second)))
+	for time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+		if resp, err := tryPop(); err != nil {
+			return nil, err
+		} else if resp != nil {
+			return resp, nil
+		}
+	}
+
+	return EncodeNullArray(), nil
+}
+
 func EncodeStreamEntries(entries []StreamEntry) []byte {
 	var buf []byte
 	buf = append(buf, []byte(fmt.Sprintf("*%d\r\n", len(entries)))...)
