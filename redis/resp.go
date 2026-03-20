@@ -18,6 +18,10 @@ const (
 	SimpleStringPrefix Prefix = "+"
 	ErrorPrefix        Prefix = "-"
 	IntegerPrefix      Prefix = ":"
+	geoLonMin                 = -180.0
+	geoLonMax                 = 180.0
+	geoLatMin                 = -85.05112878
+	geoLatMax                 = 85.05112878
 )
 
 func (p Prefix) String() string {
@@ -283,7 +287,7 @@ func HandleGeoAdd(args []string, store *Store) ([]byte, error) {
 		if err != nil {
 			return nil, errors.New("ERR value is not a valid float")
 		}
-		if lon < -180 || lon > 180 || lat < -85.05112878 || lat > 85.05112878 {
+		if lon < geoLonMin || lon > geoLonMax || lat < geoLatMin || lat > geoLatMax {
 			return nil, fmt.Errorf("ERR invalid longitude,latitude pair %.17g,%.17g", lon, lat)
 		}
 
@@ -302,8 +306,31 @@ func HandleGeoAdd(args []string, store *Store) ([]byte, error) {
 }
 
 func geoScoreFromCoordinates(lon, lat float64) float64 {
-	// GEOADD is backed by sorted sets; this keeps deterministic ordering for now.
-	return (lon+180.0)*1e6 + (lat + 90.0)
+	var score uint64
+	lonMin, lonMax := geoLonMin, geoLonMax
+	latMin, latMax := geoLatMin, geoLatMax
+
+	for i := 0; i < 26; i++ {
+		lonMid := (lonMin + lonMax) / 2
+		if lon >= lonMid {
+			score = (score << 1) | 1
+			lonMin = lonMid
+		} else {
+			score <<= 1
+			lonMax = lonMid
+		}
+
+		latMid := (latMin + latMax) / 2
+		if lat >= latMid {
+			score = (score << 1) | 1
+			latMin = latMid
+		} else {
+			score <<= 1
+			latMax = latMid
+		}
+	}
+
+	return float64(score)
 }
 
 func HandleZRank(args []string, store *Store) ([]byte, error) {
