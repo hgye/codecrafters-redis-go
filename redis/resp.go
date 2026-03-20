@@ -266,6 +266,46 @@ func HandleZAdd(args []string, store *Store) ([]byte, error) {
 	return EncodeInteger(added), nil
 }
 
+func HandleGeoAdd(args []string, store *Store) ([]byte, error) {
+	if len(args) < 4 || (len(args)-1)%3 != 0 {
+		return nil, errors.New("ERR wrong number of arguments for 'geoadd' command")
+	}
+
+	key := args[0]
+	rawEntries := args[1:]
+	entries := make([]ZSetEntry, 0, len(rawEntries)/3)
+	for i := 0; i < len(rawEntries); i += 3 {
+		lon, err := strconv.ParseFloat(rawEntries[i], 64)
+		if err != nil {
+			return nil, errors.New("ERR value is not a valid float")
+		}
+		lat, err := strconv.ParseFloat(rawEntries[i+1], 64)
+		if err != nil {
+			return nil, errors.New("ERR value is not a valid float")
+		}
+		if lon < -180 || lon > 180 || lat < -85.05112878 || lat > 85.05112878 {
+			return nil, fmt.Errorf("ERR invalid longitude,latitude pair %.17g,%.17g", lon, lat)
+		}
+
+		entries = append(entries, ZSetEntry{
+			Member: rawEntries[i+2],
+			Score:  geoScoreFromCoordinates(lon, lat),
+		})
+	}
+
+	added, err := store.ZAdd(key, entries)
+	if err != nil {
+		return nil, err
+	}
+
+	return EncodeInteger(added), nil
+}
+
+func geoScoreFromCoordinates(lon, lat float64) float64 {
+	// GEOADD is backed by sorted sets; this keeps deterministic ordering for now.
+	return (lon+180.0)*1e6 + (lat + 90.0)
+}
+
 func HandleZRank(args []string, store *Store) ([]byte, error) {
 	if len(args) != 2 {
 		return nil, errors.New("ERR wrong number of arguments for 'zrank' command")
