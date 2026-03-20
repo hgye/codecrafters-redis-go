@@ -1,6 +1,8 @@
 package redis
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"strings"
 	"sync"
@@ -104,7 +106,7 @@ func HandleACL(args []string) ([]byte, error) {
 				user.Channels = token
 			case strings.HasPrefix(token, ">"):
 				user.Flags = removeFlag(user.Flags, "nopass")
-				user.Passwords = append(user.Passwords, token[1:])
+				user.Passwords = append(user.Passwords, aclPasswordHash(token[1:]))
 			case strings.HasPrefix(token, "+") || strings.HasPrefix(token, "-"):
 				user.Flags = removeFlag(user.Flags, "allcommands")
 				if user.Commands == "" {
@@ -123,6 +125,11 @@ func HandleACL(args []string) ([]byte, error) {
 	default:
 		return nil, errors.New("ERR unsupported ACL subcommand")
 	}
+}
+
+func aclPasswordHash(password string) string {
+	sum := sha256.Sum256([]byte(password))
+	return hex.EncodeToString(sum[:])
 }
 
 func containsFlag(flags []string, target string) bool {
