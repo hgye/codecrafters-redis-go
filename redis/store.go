@@ -12,6 +12,7 @@ import (
 type Store struct {
 	mu   sync.RWMutex
 	data map[string]Value
+	geo  map[string]map[string]GeoPosition
 }
 
 type XReadStreamResult struct {
@@ -22,6 +23,11 @@ type XReadStreamResult struct {
 type ZSetEntry struct {
 	Member string
 	Score  float64
+}
+
+type GeoPosition struct {
+	Lon float64
+	Lat float64
 }
 
 type indexRange struct {
@@ -65,7 +71,7 @@ func (r indexRange) normalize(length int) (start int, stop int, ok bool) {
 }
 
 func NewStore() *Store {
-	return &Store{data: make(map[string]Value)}
+	return &Store{data: make(map[string]Value), geo: make(map[string]map[string]GeoPosition)}
 }
 
 func (s *Store) bindValue(key string, value Value) {
@@ -401,15 +407,67 @@ func (s *Store) ZRem(key string, members []string) (int64, error) {
 			delete(zv.Scores, member)
 			removed++
 		}
+		if geoMembers, ok := s.geo[key]; ok {
+			delete(geoMembers, member)
+			if len(geoMembers) == 0 {
+				delete(s.geo, key)
+			}
+		}
 	}
 
 	if len(zv.Scores) == 0 {
 		delete(s.data, key)
+		delete(s.geo, key)
 	} else {
 		s.data[key] = zv
 	}
 
 	return removed, nil
+}
+
+func (s *Store) SetGeoPositions(key string, positions map[string]GeoPosition) {
+	if len(positions) == 0 {
+		return
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, ok := s.geo[key]; !ok {
+		s.geo[key] = make(map[string]GeoPosition)
+	}
+	for member, pos := range positions {
+		s.geo[key][member] = pos
+	}
+}
+
+func (s *Store) GeoPos(key string, members []string) ([]*GeoPosition, error) {
+	out := make([]*GeoPosition, len(members))
+
+	v, ok := s.activeValue(key)
+	if !ok {
+		return out, nil
+	}
+
+	if _, isZSet := v.(ZSetValue); !isZSet {
+		return nil, fmt.Errorf("WRONGTYPE Operation against a key holding the wrong kind of value")
+	}
+
+	s.mu.RLock()
+	geoMembers := s.geo[key]
+	s.mu.RUnlock()
+	if geoMembers == nil {
+		return out, nil
+	}
+
+	for i, member := range members {
+		if pos, exists := geoMembers[member]; exists {
+			p := pos
+			out[i] = &p
+		}
+	}
+
+	return out, nil
 }
 
 func (s *Store) RPush(key string, values []string) (int64, error) {
@@ -693,6 +751,7 @@ func (s *Store) Delete(key string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.data, key)
+	delete(s.geo, key)
 }
 
 func (s *Store) Incr(key string) (int64, error) {

@@ -278,6 +278,7 @@ func HandleGeoAdd(args []string, store *Store) ([]byte, error) {
 	key := args[0]
 	rawEntries := args[1:]
 	entries := make([]ZSetEntry, 0, len(rawEntries)/3)
+	positions := make(map[string]GeoPosition, len(rawEntries)/3)
 	for i := 0; i < len(rawEntries); i += 3 {
 		lon, err := strconv.ParseFloat(rawEntries[i], 64)
 		if err != nil {
@@ -295,12 +296,14 @@ func HandleGeoAdd(args []string, store *Store) ([]byte, error) {
 			Member: rawEntries[i+2],
 			Score:  geoScoreFromCoordinates(lon, lat),
 		})
+		positions[rawEntries[i+2]] = GeoPosition{Lon: lon, Lat: lat}
 	}
 
 	added, err := store.ZAdd(key, entries)
 	if err != nil {
 		return nil, err
 	}
+	store.SetGeoPositions(key, positions)
 
 	return EncodeInteger(added), nil
 }
@@ -331,6 +334,31 @@ func geoScoreFromCoordinates(lon, lat float64) float64 {
 	}
 
 	return float64(score)
+}
+
+func HandleGeoPos(args []string, store *Store) ([]byte, error) {
+	if len(args) < 2 {
+		return nil, errors.New("ERR wrong number of arguments for 'geopos' command")
+	}
+
+	positions, err := store.GeoPos(args[0], args[1:])
+	if err != nil {
+		return nil, err
+	}
+
+	items := make([][]byte, 0, len(positions))
+	for _, pos := range positions {
+		if pos == nil {
+			items = append(items, EncodeNullArray())
+			continue
+		}
+		items = append(items, EncodeRESPArray([][]byte{
+			EncodeBulkString(strconv.FormatFloat(pos.Lon, 'f', -1, 64)),
+			EncodeBulkString(strconv.FormatFloat(pos.Lat, 'f', -1, 64)),
+		}))
+	}
+
+	return EncodeRESPArray(items), nil
 }
 
 func HandleZRank(args []string, store *Store) ([]byte, error) {
