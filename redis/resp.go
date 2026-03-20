@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -369,18 +370,11 @@ func HandleGeoDist(args []string, store *Store) ([]byte, error) {
 
 	multiplier := 1.0
 	if len(args) == 4 {
-		switch strings.ToLower(args[3]) {
-		case "m":
-			multiplier = 1.0
-		case "km":
-			multiplier = 1.0 / 1000.0
-		case "mi":
-			multiplier = 1.0 / 1609.344
-		case "ft":
-			multiplier = 1.0 / 0.3048
-		default:
+		metersPerUnit, ok := geoUnitToMeters(args[3])
+		if !ok {
 			return nil, errors.New("ERR unsupported unit provided. please use m, km, ft, mi")
 		}
+		multiplier = 1.0 / metersPerUnit
 	}
 
 	positions, err := store.GeoPos(args[0], []string{args[1], args[2]})
@@ -394,6 +388,208 @@ func HandleGeoDist(args []string, store *Store) ([]byte, error) {
 	distMeters := geoDistanceMeters(*positions[0], *positions[1])
 	dist := distMeters * multiplier
 	return EncodeBulkString(strconv.FormatFloat(dist, 'f', -1, 64)), nil
+}
+
+func HandleGeoSearch(args []string, store *Store) ([]byte, error) {
+	if len(args) < 6 {
+		return nil, errors.New("ERR wrong number of arguments for 'geosearch' command")
+	}
+
+	key := args[0]
+	i := 1
+
+	var origin GeoPosition
+	originResolved := false
+	switch strings.ToUpper(args[i]) {
+	case "FROMMEMBER":
+		if i+1 >= len(args) {
+			return nil, errors.New("ERR syntax error")
+		}
+		positions, err := store.GeoPos(key, []string{args[i+1]})
+		if err != nil {
+			return nil, err
+		}
+		if len(positions) == 0 || positions[0] == nil {
+			return EncodeArray([]string{}), nil
+		}
+		origin = *positions[0]
+		originResolved = true
+		i += 2
+	case "FROMLONLAT":
+		if i+2 >= len(args) {
+			return nil, errors.New("ERR syntax error")
+		}
+		lon, err := strconv.ParseFloat(args[i+1], 64)
+		if err != nil {
+			return nil, errors.New("ERR value is not a valid float")
+		}
+		lat, err := strconv.ParseFloat(args[i+2], 64)
+		if err != nil {
+			return nil, errors.New("ERR value is not a valid float")
+		}
+		if lon < geoLonMin || lon > geoLonMax || lat < geoLatMin || lat > geoLatMax {
+			return nil, fmt.Errorf("ERR invalid longitude,latitude pair %.17g,%.17g", lon, lat)
+		}
+		origin = GeoPosition{Lon: lon, Lat: lat}
+		originResolved = true
+		i += 3
+	default:
+		return nil, errors.New("ERR syntax error")
+	}
+
+	if !originResolved || i >= len(args) {
+		return nil, errors.New("ERR syntax error")
+	}
+
+	type geoFilter struct {
+		mode         string
+		radiusMeters float64
+		halfWidthM   float64
+		halfHeightM  float64
+	}
+
+	filter := geoFilter{}
+	switch strings.ToUpper(args[i]) {
+	case "BYRADIUS":
+		if i+2 >= len(args) {
+			return nil, errors.New("ERR syntax error")
+		}
+		radius, err := strconv.ParseFloat(args[i+1], 64)
+		if err != nil || radius < 0 {
+			return nil, errors.New("ERR value is not a valid float")
+		}
+		metersPerUnit, ok := geoUnitToMeters(args[i+2])
+		if !ok {
+			return nil, errors.New("ERR unsupported unit provided. please use m, km, ft, mi")
+		}
+		filter.mode = "radius"
+		filter.radiusMeters = radius * metersPerUnit
+		i += 3
+	case "BYBOX":
+		if i+3 >= len(args) {
+			return nil, errors.New("ERR syntax error")
+		}
+		width, err := strconv.ParseFloat(args[i+1], 64)
+		if err != nil || width < 0 {
+			return nil, errors.New("ERR value is not a valid float")
+		}
+		height, err := strconv.ParseFloat(args[i+2], 64)
+		if err != nil || height < 0 {
+			return nil, errors.New("ERR value is not a valid float")
+		}
+		metersPerUnit, ok := geoUnitToMeters(args[i+3])
+		if !ok {
+			return nil, errors.New("ERR unsupported unit provided. please use m, km, ft, mi")
+		}
+		filter.mode = "box"
+		filter.halfWidthM = (width * metersPerUnit) / 2.0
+		filter.halfHeightM = (height * metersPerUnit) / 2.0
+		i += 4
+	default:
+		return nil, errors.New("ERR syntax error")
+	}
+
+	sortOrder := "none"
+	count := -1
+	for i < len(args) {
+		tok := strings.ToUpper(args[i])
+		switch tok {
+		case "ASC":
+			sortOrder = "asc"
+			i++
+		case "DESC":
+			sortOrder = "desc"
+			i++
+		case "COUNT":
+			if i+1 >= len(args) {
+				return nil, errors.New("ERR syntax error")
+			}
+			n, err := strconv.Atoi(args[i+1])
+			if err != nil || n < 0 {
+				return nil, errors.New("ERR value is not an integer or out of range")
+			}
+			count = n
+			i += 2
+			if i < len(args) && strings.ToUpper(args[i]) == "ANY" {
+				i++
+			}
+		default:
+			return nil, errors.New("ERR syntax error")
+		}
+	}
+
+	candidates, err := store.GeoCandidates(key)
+	if err != nil {
+		return nil, err
+	}
+
+	type matched struct {
+		member string
+		dist   float64
+	}
+	matches := make([]matched, 0, len(candidates))
+	for _, c := range candidates {
+		d := geoDistanceMeters(origin, c.Position)
+		in := false
+		switch filter.mode {
+		case "radius":
+			in = d <= filter.radiusMeters
+		case "box":
+			dx := geoDistanceMeters(origin, GeoPosition{Lon: c.Position.Lon, Lat: origin.Lat})
+			dy := geoDistanceMeters(origin, GeoPosition{Lon: origin.Lon, Lat: c.Position.Lat})
+			in = dx <= filter.halfWidthM && dy <= filter.halfHeightM
+		}
+		if in {
+			matches = append(matches, matched{member: c.Member, dist: d})
+		}
+	}
+
+	switch sortOrder {
+	case "asc":
+		sort.Slice(matches, func(i, j int) bool {
+			if matches[i].dist == matches[j].dist {
+				return matches[i].member < matches[j].member
+			}
+			return matches[i].dist < matches[j].dist
+		})
+	case "desc":
+		sort.Slice(matches, func(i, j int) bool {
+			if matches[i].dist == matches[j].dist {
+				return matches[i].member < matches[j].member
+			}
+			return matches[i].dist > matches[j].dist
+		})
+	default:
+		sort.Slice(matches, func(i, j int) bool {
+			return matches[i].member < matches[j].member
+		})
+	}
+
+	if count >= 0 && count < len(matches) {
+		matches = matches[:count]
+	}
+
+	out := make([]string, 0, len(matches))
+	for _, m := range matches {
+		out = append(out, m.member)
+	}
+
+	return EncodeArray(out), nil
+}
+
+func geoUnitToMeters(unit string) (float64, bool) {
+	switch strings.ToLower(unit) {
+	case "m":
+		return 1.0, true
+	case "km":
+		return 1000.0, true
+	case "mi":
+		return 1609.344, true
+	case "ft":
+		return 0.3048, true
+	default:
+		return 0, false
+	}
 }
 
 func geoDistanceMeters(a, b GeoPosition) float64 {

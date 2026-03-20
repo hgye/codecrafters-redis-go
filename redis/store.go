@@ -30,6 +30,11 @@ type GeoPosition struct {
 	Lat float64
 }
 
+type GeoSearchCandidate struct {
+	Member   string
+	Position GeoPosition
+}
+
 type indexRange struct {
 	Start int
 	Stop  int
@@ -472,6 +477,37 @@ func (s *Store) GeoPos(key string, members []string) ([]*GeoPosition, error) {
 			if pos, ok := geoMembers[member]; ok {
 				p := pos
 				out[i] = &p
+			}
+		}
+	}
+
+	return out, nil
+}
+
+func (s *Store) GeoCandidates(key string) ([]GeoSearchCandidate, error) {
+	v, ok := s.activeValue(key)
+	if !ok {
+		return []GeoSearchCandidate{}, nil
+	}
+
+	zv, isZSet := v.(ZSetValue)
+	if !isZSet {
+		return nil, fmt.Errorf("WRONGTYPE Operation against a key holding the wrong kind of value")
+	}
+
+	s.mu.RLock()
+	geoMembers := s.geo[key]
+	s.mu.RUnlock()
+
+	out := make([]GeoSearchCandidate, 0, len(zv.Scores))
+	for member, score := range zv.Scores {
+		if decoded, ok := geoPositionFromScore(score); ok {
+			out = append(out, GeoSearchCandidate{Member: member, Position: decoded})
+			continue
+		}
+		if geoMembers != nil {
+			if pos, ok := geoMembers[member]; ok {
+				out = append(out, GeoSearchCandidate{Member: member, Position: pos})
 			}
 		}
 	}
