@@ -452,22 +452,68 @@ func (s *Store) GeoPos(key string, members []string) ([]*GeoPosition, error) {
 	if _, isZSet := v.(ZSetValue); !isZSet {
 		return nil, fmt.Errorf("WRONGTYPE Operation against a key holding the wrong kind of value")
 	}
+	zv := v.(ZSetValue)
 
 	s.mu.RLock()
 	geoMembers := s.geo[key]
 	s.mu.RUnlock()
-	if geoMembers == nil {
-		return out, nil
-	}
-
 	for i, member := range members {
-		if pos, exists := geoMembers[member]; exists {
-			p := pos
+		if geoMembers != nil {
+			if pos, exists := geoMembers[member]; exists {
+				p := pos
+				out[i] = &p
+				continue
+			}
+		}
+
+		score, exists := zv.Scores[member]
+		if !exists {
+			continue
+		}
+		if decoded, ok := geoPositionFromScore(score); ok {
+			p := decoded
 			out[i] = &p
 		}
 	}
 
 	return out, nil
+}
+
+func geoPositionFromScore(score float64) (GeoPosition, bool) {
+	if math.IsNaN(score) || math.IsInf(score, 0) || score < 0 {
+		return GeoPosition{}, false
+	}
+
+	bits := uint64(score)
+	if float64(bits) != score {
+		return GeoPosition{}, false
+	}
+	if bits > ((uint64(1) << 52) - 1) {
+		return GeoPosition{}, false
+	}
+
+	lonMin, lonMax := -180.0, 180.0
+	latMin, latMax := -85.05112878, 85.05112878
+
+	for i := 0; i < 26; i++ {
+		lonBit := (bits >> uint(51-2*i)) & 1
+		lonMid := (lonMin + lonMax) / 2
+		if lonBit == 1 {
+			lonMin = lonMid
+		} else {
+			lonMax = lonMid
+		}
+
+		latBit := (bits >> uint(50-2*i)) & 1
+		latMid := (latMin + latMax) / 2
+		if latBit == 1 {
+			latMin = latMid
+		} else {
+			latMax = latMid
+		}
+	}
+
+	return GeoPosition{Lon: (lonMin + lonMax) / 2, Lat: (latMin + latMax) / 2}, true
 }
 
 func (s *Store) RPush(key string, values []string) (int64, error) {
