@@ -620,51 +620,6 @@ func HandleConfig(args []string, cfg Config) ([]byte, error) {
 	return EncodeArray([]string{key, value}), nil
 }
 
-func HandleACL(args []string) ([]byte, error) {
-	if len(args) < 1 {
-		return nil, errors.New("ERR wrong number of arguments for 'acl' command")
-	}
-
-	subcommand := strings.ToUpper(args[0])
-	switch subcommand {
-	case "WHOAMI":
-		if len(args) != 1 {
-			return nil, errors.New("ERR wrong number of arguments for 'acl|whoami' command")
-		}
-		return EncodeBulkString("default"), nil
-	case "GETUSER":
-		if len(args) != 2 {
-			return nil, errors.New("ERR wrong number of arguments for 'acl|getuser' command")
-		}
-		if args[1] != "default" {
-			return EncodeNullArray(), nil
-		}
-
-		return EncodeRESPArray([][]byte{
-			EncodeBulkString("flags"),
-			EncodeRESPArray([][]byte{
-				EncodeBulkString("on"),
-				EncodeBulkString("nopass"),
-				EncodeBulkString("allkeys"),
-				EncodeBulkString("allchannels"),
-				EncodeBulkString("allcommands"),
-			}),
-			EncodeBulkString("passwords"),
-			EncodeRESPArray([][]byte{}),
-			EncodeBulkString("commands"),
-			EncodeBulkString("+@all"),
-			EncodeBulkString("keys"),
-			EncodeBulkString("~*"),
-			EncodeBulkString("channels"),
-			EncodeBulkString("&*"),
-			EncodeBulkString("selectors"),
-			EncodeRESPArray([][]byte{}),
-		}), nil
-	default:
-		return nil, errors.New("ERR unsupported ACL subcommand")
-	}
-}
-
 // ReadArray reads a RESP array where all elements are bulk strings.
 // It returns the array items as UTF-8 strings (without trailing CRLF).
 func ReadArray(r *bufio.Reader) ([]string, error) {
