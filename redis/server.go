@@ -94,6 +94,7 @@ func (s *Server) Start() {
 func (s *Server) handleClient(conn net.Conn) {
 	reader := bufio.NewReader(conn)
 	defer s.unsubscribeConnection(conn)
+	authenticatedUser := aclInitialAuthenticatedUser()
 	inMulti := false
 	queued := make([]queuedCommand, 0)
 	for {
@@ -144,7 +145,7 @@ func (s *Server) handleClient(conn net.Conn) {
 			case "EXEC":
 				replies := make([][]byte, 0, len(queued))
 				for _, qc := range queued {
-					reply, propagate, closeConn := s.executeCommand(qc.parts, conn, reader)
+					reply, propagate, closeConn := s.executeCommand(qc.parts, conn, reader, &authenticatedUser)
 					if reply == nil {
 						reply = EncodeError("ERR unknown command")
 					}
@@ -177,7 +178,7 @@ func (s *Server) handleClient(conn net.Conn) {
 		case "DISCARD":
 			conn.Write(EncodeError("ERR DISCARD without MULTI"))
 		default:
-			reply, propagate, closeConn := s.executeCommand(parts, conn, reader)
+			reply, propagate, closeConn := s.executeCommand(parts, conn, reader, &authenticatedUser)
 			if reply != nil {
 				conn.Write(reply)
 			}
@@ -191,12 +192,15 @@ func (s *Server) handleClient(conn net.Conn) {
 	}
 }
 
-func (s *Server) executeCommand(parts []string, conn net.Conn, reader *bufio.Reader) (reply []byte, propagate bool, closeConn bool) {
+func (s *Server) executeCommand(parts []string, conn net.Conn, reader *bufio.Reader, authenticatedUser *string) (reply []byte, propagate bool, closeConn bool) {
 	if len(parts) == 0 {
 		return EncodeError("ERR protocol error"), false, false
 	}
 
 	command := strings.ToUpper(parts[0])
+	if command != "AUTH" && authenticatedUser != nil && *authenticatedUser == "" {
+		return EncodeError("NOAUTH Authentication required."), false, false
+	}
 	inSubscribeMode := s.isSubscribedConnection(conn)
 	if inSubscribeMode && !isAllowedInSubscribeMode(command) {
 		return EncodeError(fmt.Sprintf("ERR Can't execute '%s': only (P|S)SUBSCRIBE / (P|S)UNSUBSCRIBE / PING / QUIT / RESET / PUBLISH are allowed in this context", strings.ToLower(command))), false, false
@@ -204,6 +208,15 @@ func (s *Server) executeCommand(parts []string, conn net.Conn, reader *bufio.Rea
 	args := parts[1:]
 
 	switch command {
+	case "AUTH":
+		if authenticatedUser == nil {
+			return EncodeError("ERR internal auth state unavailable"), false, false
+		}
+		resp, err := HandleAuth(args, authenticatedUser)
+		if err != nil {
+			return EncodeError(err.Error()), false, false
+		}
+		return resp, false, false
 	case "PING":
 		resp, err := handlePing(args, inSubscribeMode)
 		if err != nil {
@@ -364,7 +377,11 @@ func (s *Server) executeCommand(parts []string, conn net.Conn, reader *bufio.Rea
 		}
 		return resp, false, false
 	case "ACL":
-		resp, err := HandleACL(args)
+		currentUser := ""
+		if authenticatedUser != nil {
+			currentUser = *authenticatedUser
+		}
+		resp, err := HandleACL(args, currentUser)
 		if err != nil {
 			return EncodeError(err.Error()), false, false
 		}

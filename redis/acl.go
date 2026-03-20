@@ -31,7 +31,70 @@ var (
 	}
 )
 
-func HandleACL(args []string) ([]byte, error) {
+func aclWrongPassError() error {
+	return errors.New("WRONGPASS invalid username-password pair or user is disabled")
+}
+
+func aclInitialAuthenticatedUser() string {
+	aclMu.RLock()
+	defer aclMu.RUnlock()
+
+	user, ok := aclUsers["default"]
+	if !ok {
+		return ""
+	}
+	if !containsFlag(user.Flags, "on") {
+		return ""
+	}
+	if containsFlag(user.Flags, "nopass") {
+		return "default"
+	}
+	return ""
+}
+
+func aclAuthenticate(username, password string) error {
+	aclMu.RLock()
+	user, ok := aclUsers[username]
+	aclMu.RUnlock()
+	if !ok || !containsFlag(user.Flags, "on") {
+		return aclWrongPassError()
+	}
+
+	if containsFlag(user.Flags, "nopass") {
+		return nil
+	}
+
+	hashed := aclPasswordHash(password)
+	for _, p := range user.Passwords {
+		if p == hashed {
+			return nil
+		}
+	}
+
+	return aclWrongPassError()
+}
+
+func HandleAuth(args []string, currentUser *string) ([]byte, error) {
+	if len(args) != 1 && len(args) != 2 {
+		return nil, errors.New("ERR wrong number of arguments for 'auth' command")
+	}
+
+	username := "default"
+	password := args[0]
+	if len(args) == 2 {
+		username = args[0]
+		password = args[1]
+	}
+
+	if err := aclAuthenticate(username, password); err != nil {
+		return nil, err
+	}
+
+	*currentUser = username
+	return EncodeSimpleString("OK"), nil
+}
+
+func HandleACL(args []string, currentUser string) ([]byte, error) {
 	if len(args) < 1 {
 		return nil, errors.New("ERR wrong number of arguments for 'acl' command")
 	}
@@ -42,7 +105,10 @@ func HandleACL(args []string) ([]byte, error) {
 		if len(args) != 1 {
 			return nil, errors.New("ERR wrong number of arguments for 'acl|whoami' command")
 		}
-		return EncodeBulkString("default"), nil
+		if currentUser == "" {
+			return EncodeBulkString("default"), nil
+		}
+		return EncodeBulkString(currentUser), nil
 	case "GETUSER":
 		if len(args) != 2 {
 			return nil, errors.New("ERR wrong number of arguments for 'acl|getuser' command")
