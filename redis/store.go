@@ -458,14 +458,6 @@ func (s *Store) GeoPos(key string, members []string) ([]*GeoPosition, error) {
 	geoMembers := s.geo[key]
 	s.mu.RUnlock()
 	for i, member := range members {
-		if geoMembers != nil {
-			if pos, exists := geoMembers[member]; exists {
-				p := pos
-				out[i] = &p
-				continue
-			}
-		}
-
 		score, exists := zv.Scores[member]
 		if !exists {
 			continue
@@ -473,6 +465,14 @@ func (s *Store) GeoPos(key string, members []string) ([]*GeoPosition, error) {
 		if decoded, ok := geoPositionFromScore(score); ok {
 			p := decoded
 			out[i] = &p
+			continue
+		}
+
+		if geoMembers != nil {
+			if pos, ok := geoMembers[member]; ok {
+				p := pos
+				out[i] = &p
+			}
 		}
 	}
 
