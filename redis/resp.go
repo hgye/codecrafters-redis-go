@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -359,6 +360,57 @@ func HandleGeoPos(args []string, store *Store) ([]byte, error) {
 	}
 
 	return EncodeRESPArray(items), nil
+}
+
+func HandleGeoDist(args []string, store *Store) ([]byte, error) {
+	if len(args) != 3 && len(args) != 4 {
+		return nil, errors.New("ERR wrong number of arguments for 'geodist' command")
+	}
+
+	multiplier := 1.0
+	if len(args) == 4 {
+		switch strings.ToLower(args[3]) {
+		case "m":
+			multiplier = 1.0
+		case "km":
+			multiplier = 1.0 / 1000.0
+		case "mi":
+			multiplier = 1.0 / 1609.344
+		case "ft":
+			multiplier = 1.0 / 0.3048
+		default:
+			return nil, errors.New("ERR unsupported unit provided. please use m, km, ft, mi")
+		}
+	}
+
+	positions, err := store.GeoPos(args[0], []string{args[1], args[2]})
+	if err != nil {
+		return nil, err
+	}
+	if len(positions) != 2 || positions[0] == nil || positions[1] == nil {
+		return EncodeNullBulkString(), nil
+	}
+
+	distMeters := geoDistanceMeters(*positions[0], *positions[1])
+	dist := distMeters * multiplier
+	return EncodeBulkString(strconv.FormatFloat(dist, 'f', -1, 64)), nil
+}
+
+func geoDistanceMeters(a, b GeoPosition) float64 {
+	const earthRadiusMeters = 6372797.560856
+
+	lon1 := a.Lon * math.Pi / 180.0
+	lat1 := a.Lat * math.Pi / 180.0
+	lon2 := b.Lon * math.Pi / 180.0
+	lat2 := b.Lat * math.Pi / 180.0
+
+	dLon := lon2 - lon1
+	dLat := lat2 - lat1
+
+	sinLat := math.Sin(dLat / 2)
+	sinLon := math.Sin(dLon / 2)
+	h := sinLat*sinLat + math.Cos(lat1)*math.Cos(lat2)*sinLon*sinLon
+	return 2 * earthRadiusMeters * math.Asin(math.Sqrt(h))
 }
 
 func HandleZRank(args []string, store *Store) ([]byte, error) {
