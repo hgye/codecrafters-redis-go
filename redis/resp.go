@@ -378,7 +378,7 @@ func HandleZScore(args []string, store *Store) ([]byte, error) {
 		return EncodeNullBulkString(), nil
 	}
 
-	return EncodeBulkString(strconv.FormatFloat(score, 'g', -1, 64)), nil
+	return EncodeBulkString(strconv.FormatFloat(score, 'f', -1, 64)), nil
 }
 
 func HandleZRem(args []string, store *Store) ([]byte, error) {
